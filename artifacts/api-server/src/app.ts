@@ -44,7 +44,7 @@ if (process.env.NODE_ENV === "production") {
 
   // Fallback SPA — qualquer rota desconhecida entrega o index.html
   // para que o React Router client-side funcione
-  app.get("*", (_req, res) => {
+  app.get("*path", (_req, res) => {
     res.sendFile(path.join(dashboardDist, "index.html"));
   });
 }
