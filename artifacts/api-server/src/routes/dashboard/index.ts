@@ -1,32 +1,33 @@
-import { Router, type IRouter } from "express";
-import crypto from "crypto";
-import { pool } from "@workspace/db";
+import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import {
-  DashboardAuthBody,
-  CreateProjectBody,
-  DeleteProjectParams,
-} from "@workspace/api-zod";
-import { sqliteInsertProject, sqliteDeleteProject } from "../../lib/sqlite";
+  pgListProjects,
+  pgInsertProject,
+  pgDeleteProject,
+  pgGetStats,
+} from "../../lib/pglite";
+import {
+  sqMirrorInsertProject,
+  sqMirrorDeleteProject,
+} from "../../lib/sqlite";
 
 const router: IRouter = Router();
 
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD ?? "admin123";
 
-// ── Auth ─────────────────────────────────────────────────────────────────────
+// ── Auth ──────────────────────────────────────────────────────────────────────
 
-router.post("/dashboard/auth", async (req, res): Promise<void> => {
-  const parsed = DashboardAuthBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+router.post("/dashboard/auth", (req, res): void => {
+  const { password } = req.body as { password?: string };
+  if (!password) {
+    res.status(400).json({ error: "Campo password é obrigatório" });
     return;
   }
-  res.json({ ok: parsed.data.password === DASHBOARD_PASSWORD });
+  res.json({ ok: password === DASHBOARD_PASSWORD });
 });
 
-// ── Dashboard auth middleware ─────────────────────────────────────────────────
+// ── Middleware de autenticação ─────────────────────────────────────────────────
 
-function requireDashboard(req: Parameters<IRouter["use"]>[0] extends unknown ? never : never, res: never, next: never): void;
-function requireDashboard(req: import("express").Request, res: import("express").Response, next: import("express").NextFunction): void {
+function requireDashboard(req: Request, res: Response, next: NextFunction): void {
   const key = req.headers["x-dashboard-key"];
   if (key !== DASHBOARD_PASSWORD) {
     res.status(401).json({ error: "Não autorizado" });
@@ -38,69 +39,47 @@ function requireDashboard(req: import("express").Request, res: import("express")
 // ── Projects ──────────────────────────────────────────────────────────────────
 
 router.get("/dashboard/projects", requireDashboard, async (_req, res): Promise<void> => {
-  const { rows } = await pool.query("SELECT id, name, description, api_key, created_at FROM projects ORDER BY created_at DESC");
-  res.json(rows);
+  const projects = await pgListProjects();
+  res.json(projects);
 });
 
 router.post("/dashboard/projects", requireDashboard, async (req, res): Promise<void> => {
-  const parsed = CreateProjectBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+  const { name, description } = req.body as { name?: string; description?: string };
+  if (!name?.trim()) {
+    res.status(400).json({ error: "Campo name é obrigatório" });
     return;
   }
-
-  const { name, description } = parsed.data;
-  const apiKey = crypto.randomBytes(32).toString("hex");
-
-  const { rows } = await pool.query(
-    "INSERT INTO projects (name, description, api_key) VALUES ($1, $2, $3) RETURNING id, name, description, api_key, created_at",
-    [name, description ?? null, apiKey],
-  );
-
-  const project = rows[0];
-
-  // Mirror to SQLite
-  sqliteInsertProject(name, description ?? null, apiKey);
-
-  res.status(201).json(project);
+  try {
+    const project = await pgInsertProject(name.trim(), description?.trim() ?? null);
+    // Espelho SQLite (fire-and-forget)
+    sqMirrorInsertProject(project.name, project.description, project.api_key);
+    res.status(201).json(project);
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao criar projeto" });
+  }
 });
 
 router.delete("/dashboard/projects/:id", requireDashboard, async (req, res): Promise<void> => {
-  const params = DeleteProjectParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
+  const id = Number(req.params.id);
+  if (!id || isNaN(id)) {
+    res.status(400).json({ error: "ID inválido" });
     return;
   }
-
-  const { rows } = await pool.query("DELETE FROM projects WHERE id = $1 RETURNING id", [params.data.id]);
-  if (!rows.length) {
+  const deleted = await pgDeleteProject(id);
+  if (!deleted) {
     res.status(404).json({ error: "Projeto não encontrado" });
     return;
   }
-
-  // Mirror to SQLite
-  sqliteDeleteProject(params.data.id);
-
+  // Espelho SQLite (fire-and-forget)
+  sqMirrorDeleteProject(id);
   res.json({ ok: true });
 });
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
 router.get("/dashboard/stats", requireDashboard, async (_req, res): Promise<void> => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const [reqRes, colRes, projRes] = await Promise.all([
-    pool.query("SELECT COUNT(*) FROM request_logs WHERE created_at >= $1", [today]),
-    pool.query("SELECT COUNT(DISTINCT collection) FROM collections"),
-    pool.query("SELECT COUNT(*) FROM projects"),
-  ]);
-
-  res.json({
-    requestsToday: parseInt(reqRes.rows[0].count, 10),
-    totalCollections: parseInt(colRes.rows[0].count, 10),
-    totalProjects: parseInt(projRes.rows[0].count, 10),
-  });
+  const stats = await pgGetStats();
+  res.json(stats);
 });
 
 export default router;

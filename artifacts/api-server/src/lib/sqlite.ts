@@ -1,17 +1,10 @@
-// Usa o módulo built-in node:sqlite (disponível a partir do Node 22.5+)
-// Sem compilação nativa — funciona tanto no Replit quanto no Railway.
+// Banco secundário — espelho simultâneo de todas as escritas do PGlite.
+// node:sqlite built-in (Node 22.5+). Síncrono. Fire-and-forget nas rotas.
 import { DatabaseSync } from "node:sqlite";
 import path from "path";
 import fs from "fs";
 import { logger } from "./logger";
 
-// Em produção no Railway: persiste o banco no Volume montado (RAILWAY_VOLUME_MOUNT_PATH).
-// Em dev (Replit) ou sem volume: usa ./data/ local ao processo.
-//
-// Para persistência no Railway:
-//   1. Crie um Volume no painel Railway
-//   2. Monte-o em qualquer path (ex: /data)
-//   3. O Railway injetará RAILWAY_VOLUME_MOUNT_PATH automaticamente
 const VOLUME_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH;
 const DATA_DIR = VOLUME_PATH
   ? path.join(VOLUME_PATH, "universal-server")
@@ -23,10 +16,12 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const sqlite = new DatabaseSync(SQLITE_PATH);
+export const sqlite = new DatabaseSync(SQLITE_PATH);
 
-// Espelha o mesmo schema do PostgreSQL
 sqlite.exec(`
+  PRAGMA journal_mode = WAL;
+  PRAGMA foreign_keys = ON;
+
   CREATE TABLE IF NOT EXISTS projects (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL,
@@ -34,104 +29,89 @@ sqlite.exec(`
     api_key     TEXT UNIQUE NOT NULL,
     created_at  TEXT DEFAULT (datetime('now'))
   );
+
   CREATE TABLE IF NOT EXISTS collections (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id  INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+    project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     collection  TEXT NOT NULL,
     data        TEXT NOT NULL DEFAULT '{}',
     created_at  TEXT DEFAULT (datetime('now')),
     updated_at  TEXT DEFAULT (datetime('now'))
   );
+
   CREATE TABLE IF NOT EXISTS request_logs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id  INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+    project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     method      TEXT,
     endpoint    TEXT,
-    status      INTEGER,
+    status      INTEGER DEFAULT 200,
     created_at  TEXT DEFAULT (datetime('now'))
   );
-  CREATE INDEX IF NOT EXISTS idx_sqlite_collections_project ON collections(project_id, collection);
-  CREATE INDEX IF NOT EXISTS idx_sqlite_logs_project ON request_logs(project_id);
-  PRAGMA foreign_keys = ON;
-  PRAGMA journal_mode = WAL;
+
+  CREATE INDEX IF NOT EXISTS idx_sq_coll ON collections(project_id, collection);
+  CREATE INDEX IF NOT EXISTS idx_sq_logs ON request_logs(project_id);
 `);
 
-logger.info(
-  { path: SQLITE_PATH, volume: VOLUME_PATH ?? "local" },
-  "SQLite database initialized (node:sqlite)",
-);
+logger.info({ path: SQLITE_PATH }, "SQLite mirror ready");
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Espelhos de escrita (fire-and-forget) ─────────────────────────────────────
 
-export function sqliteInsertProject(name: string, description: string | null, apiKey: string): void {
+export function sqMirrorInsertProject(name: string, description: string | null, apiKey: string): void {
   try {
-    sqlite
-      .prepare("INSERT OR IGNORE INTO projects (name, description, api_key) VALUES (?, ?, ?)")
-      .run(name, description, apiKey);
+    sqlite.prepare("INSERT OR IGNORE INTO projects (name, description, api_key) VALUES (?, ?, ?)").run(name, description, apiKey);
   } catch (err) {
-    logger.warn({ err }, "SQLite: failed to insert project");
+    logger.warn({ err }, "SQLite mirror: insertProject failed");
   }
 }
 
-export function sqliteDeleteProject(id: number): void {
+export function sqMirrorDeleteProject(id: number): void {
   try {
     sqlite.prepare("DELETE FROM projects WHERE id = ?").run(id);
   } catch (err) {
-    logger.warn({ err }, "SQLite: failed to delete project");
+    logger.warn({ err }, "SQLite mirror: deleteProject failed");
   }
 }
 
-export function sqliteInsertCollection(
+export function sqMirrorInsertCollection(
+  pgId: number,
   projectId: number,
   collection: string,
   data: Record<string, unknown>,
 ): void {
   try {
+    // Insere com o mesmo id do PGlite para manter referência cruzada
     sqlite
-      .prepare("INSERT INTO collections (project_id, collection, data) VALUES (?, ?, ?)")
-      .run(projectId, collection, JSON.stringify(data));
+      .prepare("INSERT OR IGNORE INTO collections (id, project_id, collection, data) VALUES (?, ?, ?, ?)")
+      .run(pgId, projectId, collection, JSON.stringify(data));
   } catch (err) {
-    logger.warn({ err }, "SQLite: failed to insert collection item");
+    logger.warn({ err }, "SQLite mirror: insertCollection failed");
   }
 }
 
-export function sqliteUpdateCollection(
-  projectId: number,
-  collection: string,
-  id: number,
-  data: Record<string, unknown>,
-): void {
+export function sqMirrorUpdateCollection(id: number, data: Record<string, unknown>): void {
   try {
     sqlite
-      .prepare(
-        "UPDATE collections SET data = ?, updated_at = datetime('now') WHERE project_id = ? AND collection = ? AND id = ?",
-      )
-      .run(JSON.stringify(data), projectId, collection, id);
+      .prepare("UPDATE collections SET data = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(JSON.stringify(data), id);
   } catch (err) {
-    logger.warn({ err }, "SQLite: failed to update collection item");
+    logger.warn({ err }, "SQLite mirror: updateCollection failed");
   }
 }
 
-export function sqliteDeleteCollection(projectId: number, collection: string, id: number): void {
+export function sqMirrorDeleteCollection(id: number): void {
   try {
-    sqlite
-      .prepare("DELETE FROM collections WHERE project_id = ? AND collection = ? AND id = ?")
-      .run(projectId, collection, id);
+    sqlite.prepare("DELETE FROM collections WHERE id = ?").run(id);
   } catch (err) {
-    logger.warn({ err }, "SQLite: failed to delete collection item");
+    logger.warn({ err }, "SQLite mirror: deleteCollection failed");
   }
 }
 
-export function sqliteLogRequest(projectId: number, method: string, endpoint: string): void {
+export function sqMirrorLogRequest(projectId: number, method: string, endpoint: string): void {
   try {
     sqlite
-      .prepare(
-        "INSERT INTO request_logs (project_id, method, endpoint, status) VALUES (?, ?, ?, 200)",
-      )
+      .prepare("INSERT INTO request_logs (project_id, method, endpoint) VALUES (?, ?, ?)")
       .run(projectId, method, endpoint);
   } catch {
-    // Silencioso — falhas de log nunca devem quebrar requisições
+    // silencioso
   }
 }
-
-export default sqlite;

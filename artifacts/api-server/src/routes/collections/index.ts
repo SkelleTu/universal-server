@@ -1,171 +1,105 @@
-import { Router, type IRouter } from "express";
-import { pool } from "@workspace/db";
+import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import {
-  ListCollectionItemsParams,
-  CreateCollectionItemParams,
-  GetCollectionItemParams,
-  UpdateCollectionItemParams,
-  DeleteCollectionItemParams,
-} from "@workspace/api-zod";
+  pgGetProjectByApiKey,
+  pgListCollection,
+  pgGetCollectionItem,
+  pgInsertCollectionItem,
+  pgUpdateCollectionItem,
+  pgDeleteCollectionItem,
+  pgLogRequest,
+} from "../../lib/pglite";
 import {
-  sqliteInsertCollection,
-  sqliteUpdateCollection,
-  sqliteDeleteCollection,
-  sqliteLogRequest,
+  sqMirrorInsertCollection,
+  sqMirrorUpdateCollection,
+  sqMirrorDeleteCollection,
+  sqMirrorLogRequest,
 } from "../../lib/sqlite";
 
 const router: IRouter = Router();
 
-// ── API Key auth middleware ───────────────────────────────────────────────────
+// ── API Key auth ──────────────────────────────────────────────────────────────
 
-async function validateApiKey(
-  req: import("express").Request & { project?: Record<string, unknown> },
-  res: import("express").Response,
-  next: import("express").NextFunction,
-): Promise<void> {
-  const apiKey = (req.headers["x-api-key"] as string | undefined) ?? (req.query["api_key"] as string | undefined);
+type AuthedRequest = Request & { project?: { id: number; name: string } };
+
+async function validateApiKey(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
+  const apiKey =
+    (req.headers["x-api-key"] as string | undefined) ??
+    (req.query["api_key"] as string | undefined);
+
   if (!apiKey) {
     res.status(401).json({ error: "Header x-api-key é obrigatório" });
     return;
   }
 
-  const { rows } = await pool.query("SELECT id, name FROM projects WHERE api_key = $1", [apiKey]);
-  if (!rows.length) {
+  const project = await pgGetProjectByApiKey(apiKey);
+  if (!project) {
     res.status(403).json({ error: "Chave de API inválida" });
     return;
   }
 
-  req.project = rows[0] as Record<string, unknown>;
+  req.project = { id: project.id, name: project.name };
 
-  // Fire-and-forget log (both PG and SQLite)
-  const projectId = rows[0].id as number;
-  pool
-    .query(
-      "INSERT INTO request_logs (project_id, method, endpoint, status) VALUES ($1, $2, $3, $4)",
-      [projectId, req.method, req.path, 200],
-    )
-    .catch(() => {});
-  sqliteLogRequest(projectId, req.method, req.path);
+  // Logs fire-and-forget nos dois bancos
+  pgLogRequest(project.id, req.method, req.path);
+  sqMirrorLogRequest(project.id, req.method, req.path);
 
   next();
 }
 
+// ── Helper ────────────────────────────────────────────────────────────────────
+
+function parseRow(row: { id: number; data: Record<string, unknown>; created_at: string; updated_at: string }) {
+  return { id: row.id, ...row.data, createdAt: row.created_at, updatedAt: row.updated_at };
+}
+
 // ── GET /api/data/:collection ─────────────────────────────────────────────────
 
-router.get("/data/:collection", validateApiKey, async (req: import("express").Request & { project?: Record<string, unknown> }, res): Promise<void> => {
-  const params = ListCollectionItemsParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-
-  const projectId = (req.project!.id) as number;
-  const { rows } = await pool.query(
-    "SELECT id, data, created_at, updated_at FROM collections WHERE project_id = $1 AND collection = $2 ORDER BY created_at DESC",
-    [projectId, params.data.collection],
-  );
-
-  res.json(rows.map((r) => ({ id: r.id, ...r.data, createdAt: r.created_at, updatedAt: r.updated_at })));
+router.get("/data/:collection", validateApiKey, async (req: AuthedRequest, res): Promise<void> => {
+  const rows = await pgListCollection(req.project!.id, req.params.collection as string);
+  res.json(rows.map(parseRow));
 });
 
 // ── POST /api/data/:collection ────────────────────────────────────────────────
 
-router.post("/data/:collection", validateApiKey, async (req: import("express").Request & { project?: Record<string, unknown> }, res): Promise<void> => {
-  const params = CreateCollectionItemParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-
-  const projectId = (req.project!.id) as number;
+router.post("/data/:collection", validateApiKey, async (req: AuthedRequest, res): Promise<void> => {
+  const col = req.params.collection as string;
   const data = req.body as Record<string, unknown>;
-
-  const { rows } = await pool.query(
-    "INSERT INTO collections (project_id, collection, data) VALUES ($1, $2, $3) RETURNING id, data, created_at",
-    [projectId, params.data.collection, data],
-  );
-
-  const r = rows[0];
-  sqliteInsertCollection(projectId, params.data.collection, data);
-
-  res.status(201).json({ id: r.id, ...r.data, createdAt: r.created_at });
+  const row = await pgInsertCollectionItem(req.project!.id, col, data);
+  // Espelho SQLite
+  sqMirrorInsertCollection(row.id, req.project!.id, col, data);
+  res.status(201).json(parseRow(row));
 });
 
 // ── GET /api/data/:collection/:id ─────────────────────────────────────────────
 
-router.get("/data/:collection/:id", validateApiKey, async (req: import("express").Request & { project?: Record<string, unknown> }, res): Promise<void> => {
-  const params = GetCollectionItemParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-
-  const projectId = (req.project!.id) as number;
-  const { rows } = await pool.query(
-    "SELECT id, data, created_at, updated_at FROM collections WHERE project_id = $1 AND collection = $2 AND id = $3",
-    [projectId, params.data.collection, params.data.id],
-  );
-
-  if (!rows.length) {
-    res.status(404).json({ error: "Item não encontrado" });
-    return;
-  }
-
-  const r = rows[0];
-  res.json({ id: r.id, ...r.data, createdAt: r.created_at, updatedAt: r.updated_at });
+router.get("/data/:collection/:id", validateApiKey, async (req: AuthedRequest, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const row = await pgGetCollectionItem(req.project!.id, req.params.collection as string, id);
+  if (!row) { res.status(404).json({ error: "Item não encontrado" }); return; }
+  res.json(parseRow(row));
 });
 
 // ── PUT /api/data/:collection/:id ─────────────────────────────────────────────
 
-router.put("/data/:collection/:id", validateApiKey, async (req: import("express").Request & { project?: Record<string, unknown> }, res): Promise<void> => {
-  const params = UpdateCollectionItemParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-
-  const projectId = (req.project!.id) as number;
+router.put("/data/:collection/:id", validateApiKey, async (req: AuthedRequest, res): Promise<void> => {
+  const id = Number(req.params.id);
   const data = req.body as Record<string, unknown>;
-
-  const { rows } = await pool.query(
-    "UPDATE collections SET data = $1, updated_at = NOW() WHERE project_id = $2 AND collection = $3 AND id = $4 RETURNING id, data, updated_at",
-    [data, projectId, params.data.collection, params.data.id],
-  );
-
-  if (!rows.length) {
-    res.status(404).json({ error: "Item não encontrado" });
-    return;
-  }
-
-  const r = rows[0];
-  sqliteUpdateCollection(projectId, params.data.collection, params.data.id, data);
-
-  res.json({ id: r.id, ...r.data, updatedAt: r.updated_at });
+  const row = await pgUpdateCollectionItem(req.project!.id, req.params.collection as string, id, data);
+  if (!row) { res.status(404).json({ error: "Item não encontrado" }); return; }
+  // Espelho SQLite
+  sqMirrorUpdateCollection(id, data);
+  res.json(parseRow(row));
 });
 
 // ── DELETE /api/data/:collection/:id ──────────────────────────────────────────
 
-router.delete("/data/:collection/:id", validateApiKey, async (req: import("express").Request & { project?: Record<string, unknown> }, res): Promise<void> => {
-  const params = DeleteCollectionItemParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
-
-  const projectId = (req.project!.id) as number;
-  const { rows } = await pool.query(
-    "DELETE FROM collections WHERE project_id = $1 AND collection = $2 AND id = $3 RETURNING id",
-    [projectId, params.data.collection, params.data.id],
-  );
-
-  if (!rows.length) {
-    res.status(404).json({ error: "Item não encontrado" });
-    return;
-  }
-
-  sqliteDeleteCollection(projectId, params.data.collection, params.data.id);
-
-  res.json({ ok: true, deleted: rows[0].id });
+router.delete("/data/:collection/:id", validateApiKey, async (req: AuthedRequest, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const ok = await pgDeleteCollectionItem(req.project!.id, req.params.collection as string, id);
+  if (!ok) { res.status(404).json({ error: "Item não encontrado" }); return; }
+  // Espelho SQLite
+  sqMirrorDeleteCollection(id);
+  res.json({ ok: true, deleted: id });
 });
 
 export default router;
