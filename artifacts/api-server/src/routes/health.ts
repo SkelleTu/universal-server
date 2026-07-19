@@ -1,11 +1,11 @@
 import { Router, type IRouter } from "express";
-import { HealthCheckResponse } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
-router.get("/healthz", (_req, res) => {
-  const data = HealthCheckResponse.parse({ status: "ok" });
-  res.json(data);
+const startTime = Date.now();
+
+router.get("/healthz", (_req, res): void => {
+  res.json({ status: "ok", uptime: Math.floor((Date.now() - startTime) / 1000) });
 });
 
 export default router;
