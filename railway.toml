@@ -1,5 +1,3 @@
-$schema = "https://railway.com/railway.schema.json"
-
 [build]
 # 1. instala dependências do monorepo
 # 2. compila o dashboard (SPA estático) → artifacts/dashboard/dist/public/
