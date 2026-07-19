@@ -1,0 +1,8 @@
+# Exclui artefatos de build e dependências locais do contexto enviado ao Railway
+node_modules
+.git
+artifacts/dashboard/dist
+artifacts/api-server/dist
+artifacts/mockup-sandbox/dist
+.agents
+attached_assets

@@ -1,0 +1,20 @@
+$schema = "https://railway.com/railway.schema.json"
+
+[build]
+# 1. instala dependências do monorepo
+# 2. compila o dashboard (SPA estático) → artifacts/dashboard/dist/public/
+# 3. compila o api-server (bundle ESM via esbuild) → artifacts/api-server/dist/
+buildCommand = "pnpm install --frozen-lockfile && PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build && pnpm --filter @workspace/api-server run build"
+
+[deploy]
+# Inicia o servidor a partir da raiz para que process.cwd() aponte ao repo root
+# (necessário para servir os estáticos do dashboard via express.static)
+startCommand = "NODE_ENV=production node --enable-source-maps artifacts/api-server/dist/index.mjs"
+
+# Health check — Railway reinicia o container se /api/healthz não responder
+healthcheckPath = "/api/healthz"
+healthcheckTimeout = 60
+
+# Política de restart em caso de falha
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

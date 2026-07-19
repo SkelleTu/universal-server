@@ -1,11 +1,22 @@
-// Uses the built-in node:sqlite module available in Node.js 22.5+
-// No native addon compilation required.
+// Usa o módulo built-in node:sqlite (disponível a partir do Node 22.5+)
+// Sem compilação nativa — funciona tanto no Replit quanto no Railway.
 import { DatabaseSync } from "node:sqlite";
 import path from "path";
 import fs from "fs";
 import { logger } from "./logger";
 
-const DATA_DIR = path.resolve(process.cwd(), "data");
+// Em produção no Railway: persiste o banco no Volume montado (RAILWAY_VOLUME_MOUNT_PATH).
+// Em dev (Replit) ou sem volume: usa ./data/ local ao processo.
+//
+// Para persistência no Railway:
+//   1. Crie um Volume no painel Railway
+//   2. Monte-o em qualquer path (ex: /data)
+//   3. O Railway injetará RAILWAY_VOLUME_MOUNT_PATH automaticamente
+const VOLUME_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH;
+const DATA_DIR = VOLUME_PATH
+  ? path.join(VOLUME_PATH, "universal-server")
+  : path.resolve(process.cwd(), "data");
+
 const SQLITE_PATH = path.join(DATA_DIR, "universal-server.db");
 
 if (!fs.existsSync(DATA_DIR)) {
@@ -14,7 +25,7 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const sqlite = new DatabaseSync(SQLITE_PATH);
 
-// Mirror the same schema as PostgreSQL
+// Espelha o mesmo schema do PostgreSQL
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS projects (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,7 +56,10 @@ sqlite.exec(`
   PRAGMA journal_mode = WAL;
 `);
 
-logger.info({ path: SQLITE_PATH }, "SQLite database initialized (node:sqlite)");
+logger.info(
+  { path: SQLITE_PATH, volume: VOLUME_PATH ?? "local" },
+  "SQLite database initialized (node:sqlite)",
+);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -111,10 +125,12 @@ export function sqliteDeleteCollection(projectId: number, collection: string, id
 export function sqliteLogRequest(projectId: number, method: string, endpoint: string): void {
   try {
     sqlite
-      .prepare("INSERT INTO request_logs (project_id, method, endpoint, status) VALUES (?, ?, ?, 200)")
+      .prepare(
+        "INSERT INTO request_logs (project_id, method, endpoint, status) VALUES (?, ?, ?, 200)",
+      )
       .run(projectId, method, endpoint);
   } catch {
-    // swallow — logging failures should never break requests
+    // Silencioso — falhas de log nunca devem quebrar requisições
   }
 }
 
