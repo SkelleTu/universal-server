@@ -48,8 +48,21 @@ sqlite.exec(`
     created_at  TEXT DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS game_cache (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    namespace   TEXT NOT NULL,
+    cache_key   TEXT NOT NULL,
+    data        TEXT NOT NULL DEFAULT '{}',
+    expires_at  TEXT,
+    created_at  TEXT DEFAULT (datetime('now')),
+    updated_at  TEXT DEFAULT (datetime('now')),
+    UNIQUE(project_id, namespace, cache_key)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_sq_coll ON collections(project_id, collection);
   CREATE INDEX IF NOT EXISTS idx_sq_logs ON request_logs(project_id);
+  CREATE INDEX IF NOT EXISTS idx_sq_game_cache ON game_cache(project_id, namespace, cache_key);
 `);
 
 logger.info({ path: SQLITE_PATH }, "SQLite mirror ready");
@@ -79,7 +92,6 @@ export function sqMirrorInsertCollection(
   data: Record<string, unknown>,
 ): void {
   try {
-    // Insere com o mesmo id do PGlite para manter referência cruzada
     sqlite
       .prepare("INSERT OR IGNORE INTO collections (id, project_id, collection, data) VALUES (?, ?, ?, ?)")
       .run(pgId, projectId, collection, JSON.stringify(data));
@@ -103,6 +115,48 @@ export function sqMirrorDeleteCollection(id: number): void {
     sqlite.prepare("DELETE FROM collections WHERE id = ?").run(id);
   } catch (err) {
     logger.warn({ err }, "SQLite mirror: deleteCollection failed");
+  }
+}
+
+export function sqMirrorUpsertGameCache(
+  pgId: number,
+  projectId: number,
+  namespace: string,
+  cacheKey: string,
+  data: Record<string, unknown>,
+  expiresAt: string | null,
+): void {
+  try {
+    sqlite
+      .prepare(
+        `INSERT INTO game_cache (id, project_id, namespace, cache_key, data, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(project_id, namespace, cache_key)
+         DO UPDATE SET data = excluded.data, expires_at = excluded.expires_at, updated_at = datetime('now')`,
+      )
+      .run(pgId, projectId, namespace, cacheKey, JSON.stringify(data), expiresAt);
+  } catch (err) {
+    logger.warn({ err }, "SQLite mirror: upsertGameCache failed");
+  }
+}
+
+export function sqMirrorDeleteGameCache(projectId: number, namespace: string, cacheKey: string): void {
+  try {
+    sqlite
+      .prepare("DELETE FROM game_cache WHERE project_id = ? AND namespace = ? AND cache_key = ?")
+      .run(projectId, namespace, cacheKey);
+  } catch (err) {
+    logger.warn({ err }, "SQLite mirror: deleteGameCache failed");
+  }
+}
+
+export function sqGetDatabaseHealth(): { ok: boolean; latencyMs: number } {
+  const started = Date.now();
+  try {
+    sqlite.prepare("SELECT 1").get();
+    return { ok: true, latencyMs: Date.now() - started };
+  } catch {
+    return { ok: false, latencyMs: Date.now() - started };
   }
 }
 
