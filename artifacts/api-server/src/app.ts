@@ -7,6 +7,8 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+app.set("trust proxy", 1);
+
 app.use(
   pinoHttp({
     logger,
@@ -26,24 +28,31 @@ app.use(
     },
   }),
 );
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
+const configuredOrigins = (process.env.CORS_ORIGINS ?? "*")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: configuredOrigins.includes("*") ? true : configuredOrigins,
+    credentials: true,
+  }),
+);
+
+// Mantém payloads do mundo/mapa sob controle para evitar uploads acidentais gigantes.
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT ?? "2mb" }));
+app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT ?? "2mb" }));
 
 // API routes — sempre têm prioridade sobre qualquer rota estática
 app.use("/api", router);
 
-// Em produção (Railway), o api-server serve o dashboard como SPA estática.
+// Em produção (Railway/Replit), o api-server serve o dashboard como SPA estática.
 // O build do dashboard gera os arquivos em artifacts/dashboard/dist/public/
-// Process.cwd() = raiz do repo quando iniciado via `node artifacts/api-server/dist/index.mjs`
 if (process.env.NODE_ENV === "production") {
   const dashboardDist = path.resolve(process.cwd(), "artifacts/dashboard/dist/public");
-
-  // Arquivos estáticos (JS, CSS, assets)
   app.use(express.static(dashboardDist));
-
-  // Fallback SPA — qualquer rota desconhecida entrega o index.html
-  // para que o React Router client-side funcione
   app.get("*path", (_req, res) => {
     res.sendFile(path.join(dashboardDist, "index.html"));
   });
