@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApiAuth, useApi } from '@/hooks/use-api';
-import { useHealthCheck } from '@workspace/api-client-react';
+import { useHealthCheck, type Project } from '@workspace/api-client-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -337,7 +337,7 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-16">
-            {projects?.map((project, i) => (
+            {projects?.map((project: Project, i: number) => (
               <Card 
                 key={project.id} 
                 className="glass-panel border-white/5 animate-in fade-in slide-in-from-bottom-4 duration-500 fill-mode-both"
