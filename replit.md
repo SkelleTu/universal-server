@@ -1,15 +1,17 @@
-# [Project name]
+# Universal Server Dashboard
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Dashboard for managing Universal Server projects, API keys, collections, and server health.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/dashboard run dev` — run the dashboard (requires `PORT=23183 BASE_PATH=/`)
+- `pnpm --filter @workspace/api-server run dev` — run the API server (requires `PORT=8080`)
 - `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
+- `PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build` — build the publishable dashboard
+- `pnpm --filter @workspace/api-server run build` — bundle the API server
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- The API uses embedded PGlite/SQLite storage by default; `DATABASE_URL` is only required by the optional Drizzle/Postgres library.
 
 ## Stack
 
@@ -22,23 +24,32 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/dashboard` — React/Vite web app served at `/`
+- `artifacts/api-server` — Express API served at `/api`; its production bundle can serve the dashboard as a SPA
+- `artifacts/mockup-sandbox` — internal component preview server at `/__mockup`
+- `lib/api-spec/openapi.yaml` — API contract source of truth
+- `lib/db/src/schema` — Drizzle schema source
+- `artifacts/*/.replit-artifact/artifact.toml` — artifact development and production configuration
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The dashboard is the root web artifact; the API is mounted under `/api`.
+- Production deployment is configured through the artifact manifests rather than a root run command.
+- The API initializes embedded PGlite and SQLite mirrors before listening.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Users authenticate with a dashboard key, monitor server health and usage, create projects with API keys, and manage project collections.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- The imported project should be kept publishable without restructuring its pnpm workspace.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Use Node 24 and pnpm 10 as declared by the root package.
+- Dashboard development requires both `PORT` and `BASE_PATH`.
+- The full root build also includes the internal mockup sandbox; the publish path builds the dashboard and API artifacts directly.
 
 ## Pointers
 
