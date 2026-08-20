@@ -1,8 +1,9 @@
-modules = ["nodejs-24", "postgresql-16"]
+modules = ["web", "bash", "nodejs-24"]
 
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
+run = ["pnpm", "start"]
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
@@ -10,6 +11,43 @@ env = { "CI" = "true" }
 
 [workflows]
 runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start dashboard"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start API server"
+
+[[workflows.workflow]]
+name = "Start dashboard"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=23183 BASE_PATH=/ pnpm --filter @workspace/dashboard run dev"
+waitForPort = 23183
+
+[[workflows.workflow]]
+name = "Start API server"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=8080 pnpm --filter @workspace/api-server run dev"
+waitForPort = 8080
 
 [agent]
 stack = "PNPM_WORKSPACE"
