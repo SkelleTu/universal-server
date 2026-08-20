@@ -49,8 +49,21 @@ export async function initPGlite(): Promise<void> {
       created_at  TIMESTAMPTZ DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS game_cache (
+      id          SERIAL PRIMARY KEY,
+      project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      namespace   TEXT NOT NULL,
+      cache_key   TEXT NOT NULL,
+      data        JSONB NOT NULL DEFAULT '{}',
+      expires_at  TIMESTAMPTZ,
+      created_at  TIMESTAMPTZ DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(project_id, namespace, cache_key)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_pg_coll ON collections(project_id, collection);
     CREATE INDEX IF NOT EXISTS idx_pg_logs ON request_logs(project_id);
+    CREATE INDEX IF NOT EXISTS idx_pg_game_cache ON game_cache(project_id, namespace, cache_key);
   `);
 
   logger.info({ dir: PG_DIR, volume: VOLUME_PATH ?? "local" }, "PGlite (embedded PostgreSQL) ready");
@@ -78,10 +91,21 @@ export type CollectionRow = {
   updated_at: string;
 };
 
+export type GameCacheRow = {
+  id: number;
+  namespace: string;
+  cache_key: string;
+  data: Record<string, unknown>;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Stats = {
   requestsToday: number;
   totalCollections: number;
   totalProjects: number;
+  totalGameCacheEntries: number;
 };
 
 // ── Projects ──────────────────────────────────────────────────────────────────
@@ -180,10 +204,66 @@ export async function pgDeleteCollectionItem(
   return (res.rows?.length ?? 0) > 0;
 }
 
+// ── Game cache ────────────────────────────────────────────────────────────────
+
+export async function pgGetGameCache(
+  projectId: number,
+  namespace: string,
+  cacheKey: string,
+): Promise<GameCacheRow | null> {
+  const res = await pg().query<GameCacheRow>(
+    `SELECT id, namespace, cache_key, data, expires_at::text, created_at::text, updated_at::text
+     FROM game_cache
+     WHERE project_id = $1 AND namespace = $2 AND cache_key = $3
+       AND (expires_at IS NULL OR expires_at > NOW())`,
+    [projectId, namespace, cacheKey],
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function pgUpsertGameCache(
+  projectId: number,
+  namespace: string,
+  cacheKey: string,
+  data: Record<string, unknown>,
+  expiresAt: string | null,
+): Promise<GameCacheRow> {
+  const res = await pg().query<GameCacheRow>(
+    `INSERT INTO game_cache (project_id, namespace, cache_key, data, expires_at)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (project_id, namespace, cache_key)
+     DO UPDATE SET data = EXCLUDED.data, expires_at = EXCLUDED.expires_at, updated_at = NOW()
+     RETURNING id, namespace, cache_key, data, expires_at::text, created_at::text, updated_at::text`,
+    [projectId, namespace, cacheKey, data, expiresAt],
+  );
+  return res.rows[0];
+}
+
+export async function pgDeleteGameCache(
+  projectId: number,
+  namespace: string,
+  cacheKey: string,
+): Promise<boolean> {
+  const res = await pg().query(
+    "DELETE FROM game_cache WHERE project_id = $1 AND namespace = $2 AND cache_key = $3 RETURNING id",
+    [projectId, namespace, cacheKey],
+  );
+  return (res.rows?.length ?? 0) > 0;
+}
+
+export async function pgGetDatabaseHealth(): Promise<{ ok: boolean; latencyMs: number }> {
+  const started = Date.now();
+  try {
+    await pg().query("SELECT 1");
+    return { ok: true, latencyMs: Date.now() - started };
+  } catch {
+    return { ok: false, latencyMs: Date.now() - started };
+  }
+}
+
 // ── Logs ──────────────────────────────────────────────────────────────────────
 
 export function pgLogRequest(projectId: number, method: string, endpoint: string): void {
-  // fire-and-forget — nunca bloqueia a requisição
   pg()
     .query("INSERT INTO request_logs (project_id, method, endpoint) VALUES ($1, $2, $3)", [
       projectId,
@@ -193,18 +273,20 @@ export function pgLogRequest(projectId: number, method: string, endpoint: string
     .catch(() => {});
 }
 
-// ── Stats ─────────────────────────────────────────────────────────────────────
+// ── Stats ──────────────────────────────────────────────────────────────────────
 
 export async function pgGetStats(): Promise<Stats> {
   const today = new Date().toISOString().slice(0, 10);
-  const [req, col, proj] = await Promise.all([
+  const [req, col, proj, cache] = await Promise.all([
     pg().query<{ c: string }>("SELECT COUNT(*) AS c FROM request_logs WHERE created_at >= $1", [today]),
     pg().query<{ c: string }>("SELECT COUNT(DISTINCT collection || project_id::text) AS c FROM collections"),
     pg().query<{ c: string }>("SELECT COUNT(*) AS c FROM projects"),
+    pg().query<{ c: string }>("SELECT COUNT(*) AS c FROM game_cache"),
   ]);
   return {
     requestsToday: parseInt(req.rows[0].c, 10),
     totalCollections: parseInt(col.rows[0].c, 10),
     totalProjects: parseInt(proj.rows[0].c, 10),
+    totalGameCacheEntries: parseInt(cache.rows[0].c, 10),
   };
 }
