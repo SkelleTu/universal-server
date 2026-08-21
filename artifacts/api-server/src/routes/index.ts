@@ -5,6 +5,7 @@ import collectionsRouter from "./collections";
 import gameRouter from "./game";
 import weatherRouter from "./weather";
 import googleRouter from "./google";
+import playerStateRouter from "./player-state";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(collectionsRouter);
 router.use(gameRouter);
 router.use(weatherRouter);
 router.use(googleRouter);
+router.use(playerStateRouter);
 
 export default router;
