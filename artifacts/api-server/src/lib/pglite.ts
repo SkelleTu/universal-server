@@ -7,21 +7,15 @@ import crypto from "crypto";
 import { logger } from "./logger";
 
 const VOLUME_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH;
-const DATA_DIR = VOLUME_PATH
-  ? path.join(VOLUME_PATH, "universal-server")
-  : path.resolve(process.cwd(), "data");
-
+const DATA_DIR = VOLUME_PATH ? path.join(VOLUME_PATH, "universal-server") : path.resolve(process.cwd(), "data");
 const PG_DIR = path.join(DATA_DIR, "postgres");
 
-if (!fs.existsSync(PG_DIR)) {
-  fs.mkdirSync(PG_DIR, { recursive: true });
-}
+if (!fs.existsSync(PG_DIR)) fs.mkdirSync(PG_DIR, { recursive: true });
 
 let _pg: PGlite;
 
 export async function initPGlite(): Promise<void> {
   _pg = new PGlite(`file://${PG_DIR}`);
-
   await _pg.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id SERIAL PRIMARY KEY, name TEXT NOT NULL, description TEXT, api_key TEXT UNIQUE NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW()
@@ -43,7 +37,6 @@ export async function initPGlite(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_pg_logs ON request_logs(project_id);
     CREATE INDEX IF NOT EXISTS idx_pg_game_cache ON game_cache(project_id, namespace, cache_key);
   `);
-
   logger.info({ dir: PG_DIR, volume: VOLUME_PATH ?? "local" }, "PGlite (embedded PostgreSQL) ready");
 }
 
@@ -85,6 +78,16 @@ export async function pgDeleteCollectionItem(projectId: number, collection: stri
 
 export async function pgGetGameCache(projectId: number, namespace: string, cacheKey: string): Promise<GameCacheRow | null> {
   const res = await pg().query<GameCacheRow>(`SELECT id, namespace, cache_key, data, expires_at::text, created_at::text, updated_at::text FROM game_cache WHERE project_id = $1 AND namespace = $2 AND cache_key = $3 AND (expires_at IS NULL OR expires_at > NOW())`, [projectId, namespace, cacheKey]); return res.rows[0] ?? null;
+}
+export async function pgListGameCache(projectId: number, namespace: string, limit = 100): Promise<GameCacheRow[]> {
+  const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 200);
+  const res = await pg().query<GameCacheRow>(`SELECT id, namespace, cache_key, data, expires_at::text, created_at::text, updated_at::text FROM game_cache WHERE project_id = $1 AND namespace = $2 AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY updated_at DESC LIMIT ${safeLimit}`, [projectId, namespace]);
+  return res.rows;
+}
+export async function pgListGameCacheSince(projectId: number, namespace: string, since: string, limit = 100): Promise<GameCacheRow[]> {
+  const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 200);
+  const res = await pg().query<GameCacheRow>(`SELECT id, namespace, cache_key, data, expires_at::text, created_at::text, updated_at::text FROM game_cache WHERE project_id = $1 AND namespace = $2 AND updated_at > $3 AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY updated_at ASC LIMIT ${safeLimit}`, [projectId, namespace, since]);
+  return res.rows;
 }
 export async function pgUpsertGameCache(projectId: number, namespace: string, cacheKey: string, data: Record<string, unknown>, expiresAt: string | null): Promise<GameCacheRow> {
   const res = await pg().query<GameCacheRow>(`INSERT INTO game_cache (project_id, namespace, cache_key, data, expires_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (project_id, namespace, cache_key) DO UPDATE SET data = EXCLUDED.data, expires_at = EXCLUDED.expires_at, updated_at = NOW() RETURNING id, namespace, cache_key, data, expires_at::text, created_at::text, updated_at::text`, [projectId, namespace, cacheKey, data, expiresAt]); return res.rows[0];
