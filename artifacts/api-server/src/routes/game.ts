@@ -40,6 +40,16 @@ function decodeKey(value: string): string {
   return decodeURIComponent(value);
 }
 
+function numberParam(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function streetViewKey(): string | null {
+  const value = process.env.GOOGLE_MAPS_API_KEY?.trim();
+  return value ? value : null;
+}
+
 const gameVersion = process.env.GAME_VERSION ?? "0.1.0";
 const serverVersion = process.env.SERVER_VERSION ?? "1.0.0";
 const expirationAt = process.env.SERVER_EXPIRATION_AT ?? null;
@@ -75,6 +85,9 @@ router.get("/game/status", authenticate, async (req: AuthedRequest, res): Promis
       pglite: postgres,
       sqlite: sqlite,
     },
+    integrations: {
+      streetViewStaticApi: Boolean(streetViewKey()),
+    },
   });
 });
 
@@ -96,6 +109,10 @@ router.get("/game/manifest", authenticate, (_req: AuthedRequest, res): void => {
       primary: "PGlite/PostgreSQL",
       mirror: "SQLite",
       gitBacked: false,
+    },
+    integrations: {
+      streetViewStaticApi: Boolean(streetViewKey()),
+      streetViewPolicy: "metadata-and-identifiers-persisted; imagery requested on demand",
     },
   });
 });
@@ -176,6 +193,133 @@ router.delete(
     }
 
     res.json({ ok: true, deleted: true, namespace, cacheKey });
+  },
+);
+
+router.get(
+  "/game/streetview/metadata",
+  authenticate,
+  async (req: AuthedRequest, res): Promise<void> => {
+    const key = streetViewKey();
+    if (!key) {
+      res.status(503).json({ error: "GOOGLE_MAPS_API_KEY não configurada" });
+      return;
+    }
+
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    const radius = Math.min(Math.max(numberParam(req.query.radius, 50), 0), 100);
+
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      res.status(400).json({ error: "lat e lng válidos são obrigatórios" });
+      return;
+    }
+
+    const cacheKey = `${lat.toFixed(6)},${lng.toFixed(6)},${radius}`;
+    const cached = await pgGetGameCache(req.project!.id, "streetview", cacheKey);
+    if (cached) {
+      res.json({ hit: true, source: "cache", data: cached.data });
+      return;
+    }
+
+    const params = new URLSearchParams({
+      location: `${lat},${lng}`,
+      radius: String(radius),
+      source: "outdoor",
+      key,
+    });
+
+    const response = await fetch(`https://maps.googleapis.com/maps/api/streetview/metadata?${params.toString()}`);
+    const payload = (await response.json()) as Record<string, unknown>;
+    const status = String(payload.status ?? "UNKNOWN");
+
+    if (!response.ok || status !== "OK") {
+      res.status(status === "ZERO_RESULTS" ? 404 : 502).json({
+        error: "Street View metadata request failed",
+        googleStatus: status,
+        data: payload,
+      });
+      return;
+    }
+
+    const safeData = {
+      status,
+      pano: payload.pano ?? null,
+      location: payload.location ?? null,
+      date: payload.date ?? null,
+      copyright: payload.copyright ?? null,
+      sourceLat: lat,
+      sourceLng: lng,
+      radius,
+      fetchedAt: new Date().toISOString(),
+    };
+
+    const row = await pgUpsertGameCache(
+      req.project!.id,
+      "streetview",
+      cacheKey,
+      safeData,
+      null,
+    );
+    sqMirrorUpsertGameCache(row.id, req.project!.id, "streetview", cacheKey, safeData, null);
+
+    res.json({ hit: false, source: "google", data: safeData });
+  },
+);
+
+router.get(
+  "/game/streetview/image",
+  authenticate,
+  async (req: AuthedRequest, res): Promise<void> => {
+    const key = streetViewKey();
+    if (!key) {
+      res.status(503).json({ error: "GOOGLE_MAPS_API_KEY não configurada" });
+      return;
+    }
+
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    const heading = ((numberParam(req.query.heading, 0) % 360) + 360) % 360;
+    const pitch = Math.min(Math.max(numberParam(req.query.pitch, 0), -90), 90);
+    const fov = Math.min(Math.max(numberParam(req.query.fov, 90), 10), 120);
+    const width = Math.min(Math.max(Math.floor(numberParam(req.query.width, 640)), 1), 640);
+    const height = Math.min(Math.max(Math.floor(numberParam(req.query.height, 400)), 1), 640);
+    const radius = Math.min(Math.max(numberParam(req.query.radius, 50), 0), 100);
+
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      res.status(400).json({ error: "lat e lng válidos são obrigatórios" });
+      return;
+    }
+
+    const params = new URLSearchParams({
+      size: `${width}x${height}`,
+      location: `${lat},${lng}`,
+      heading: String(heading),
+      pitch: String(pitch),
+      fov: String(fov),
+      radius: String(radius),
+      source: "outdoor",
+      return_error_code: "true",
+      key,
+    });
+
+    const response = await fetch(`https://maps.googleapis.com/maps/api/streetview?${params.toString()}`);
+    const contentType = response.headers.get("content-type") ?? "image/jpeg";
+
+    if (!response.ok) {
+      const body = await response.text();
+      res.status(response.status >= 400 && response.status < 500 ? response.status : 502).json({
+        error: "Street View image request failed",
+        details: body.slice(0, 500),
+      });
+      return;
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(buffer);
   },
 );
 
