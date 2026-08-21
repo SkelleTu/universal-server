@@ -24,10 +24,10 @@ type NormalizedWeather = {
   weatherCode: number | null;
 };
 
-async function authenticate(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
+async function authenticateIfProvided(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
   const apiKey = (req.headers["x-api-key"] as string | undefined) ?? (req.query["api_key"] as string | undefined);
   if (!apiKey) {
-    res.status(401).json({ error: "Header x-api-key é obrigatório" });
+    next();
     return;
   }
   const project = await pgGetProjectByApiKey(apiKey);
@@ -182,7 +182,7 @@ async function fetchOpenMeteoWeather(lat: number, lng: number): Promise<Normaliz
   };
 }
 
-router.get("/game/weather/current", authenticate, async (req: AuthedRequest, res): Promise<void> => {
+router.get("/game/weather/current", authenticateIfProvided, async (req: AuthedRequest, res): Promise<void> => {
   const lat = numberParam(req.query.lat, -22.3572);
   const lng = numberParam(req.query.lng, -47.3841);
 
