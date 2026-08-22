@@ -12,7 +12,11 @@ import {
 
 const router: IRouter = Router();
 
-const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD ?? "admin123";
+// Nunca use uma senha administrativa padrão em produção.
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD?.trim();
+if (!DASHBOARD_PASSWORD) {
+  throw new Error("DASHBOARD_PASSWORD environment variable is required.");
+}
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
