@@ -1,0 +1,1 @@
+- [Runtime and deployment compatibility](runtime-compatibility.md) — Node SQLite needs a modern runtime; protected Deployments can intercept external API calls with HTML.

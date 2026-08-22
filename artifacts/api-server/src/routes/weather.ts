@@ -25,18 +25,22 @@ type NormalizedWeather = {
 };
 
 async function authenticateIfProvided(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
-  const apiKey = (req.headers["x-api-key"] as string | undefined) ?? (req.query["api_key"] as string | undefined);
-  if (!apiKey) {
+  try {
+    const apiKey = (req.headers["x-api-key"] as string | undefined) ?? (req.query["api_key"] as string | undefined);
+    if (!apiKey) {
+      next();
+      return;
+    }
+    const project = await pgGetProjectByApiKey(apiKey);
+    if (!project) {
+      res.type("application/json").status(403).json({ error: "Chave de API inválida" });
+      return;
+    }
+    req.project = { id: project.id, name: project.name };
     next();
-    return;
+  } catch {
+    res.type("application/json").status(503).json({ error: "Serviço de autenticação indisponível" });
   }
-  const project = await pgGetProjectByApiKey(apiKey);
-  if (!project) {
-    res.status(403).json({ error: "Chave de API inválida" });
-    return;
-  }
-  req.project = { id: project.id, name: project.name };
-  next();
 }
 
 function numberParam(value: unknown, fallback: number): number {
@@ -95,7 +99,12 @@ async function fetchGoogleWeather(lat: number, lng: number, key: string): Promis
 
   const response = await fetch(url);
   if (!response.ok) return null;
-  const payload = (await response.json()) as Record<string, unknown>;
+  let payload: Record<string, unknown>;
+  try {
+    payload = (await response.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
   const condition = objectValue(payload, "weatherCondition");
   const wind = objectValue(payload, "wind");
 
@@ -155,7 +164,12 @@ async function fetchOpenMeteoWeather(lat: number, lng: number): Promise<Normaliz
 
   const response = await fetch(url);
   if (!response.ok) return null;
-  const payload = (await response.json()) as { current?: Record<string, unknown>; timezone?: string };
+  let payload: { current?: Record<string, unknown>; timezone?: string };
+  try {
+    payload = (await response.json()) as { current?: Record<string, unknown>; timezone?: string };
+  } catch {
+    return null;
+  }
   const current = payload.current;
   if (!current) return null;
   const code = num(current.weather_code);
@@ -183,31 +197,35 @@ async function fetchOpenMeteoWeather(lat: number, lng: number): Promise<Normaliz
 }
 
 router.get("/game/weather/current", authenticateIfProvided, async (req: AuthedRequest, res): Promise<void> => {
-  const lat = numberParam(req.query.lat, -22.3572);
-  const lng = numberParam(req.query.lng, -47.3841);
+  try {
+    const lat = numberParam(req.query.lat, -22.3572);
+    const lng = numberParam(req.query.lng, -47.3841);
 
-  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-    res.status(400).json({ error: "lat/lng inválidos" });
-    return;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      res.type("application/json").status(400).json({ error: "lat/lng inválidos" });
+      return;
+    }
+
+    let data: NormalizedWeather | null = null;
+    const key = googleKey();
+    if (key) data = await fetchGoogleWeather(lat, lng, key);
+    if (!data) data = await fetchOpenMeteoWeather(lat, lng);
+
+    if (!data) {
+      res.type("application/json").status(502).json({ error: "Não foi possível obter as condições meteorológicas atuais" });
+      return;
+    }
+
+    res.setHeader("Cache-Control", "no-store");
+    res.type("application/json").status(200).json({
+      ok: true,
+      location: { latitude: lat, longitude: lng },
+      serverTime: new Date().toISOString(),
+      data,
+    });
+  } catch {
+    res.type("application/json").status(502).json({ error: "Serviço de clima temporariamente indisponível" });
   }
-
-  let data: NormalizedWeather | null = null;
-  const key = googleKey();
-  if (key) data = await fetchGoogleWeather(lat, lng, key);
-  if (!data) data = await fetchOpenMeteoWeather(lat, lng);
-
-  if (!data) {
-    res.status(502).json({ error: "Não foi possível obter as condições meteorológicas atuais" });
-    return;
-  }
-
-  res.setHeader("Cache-Control", "no-store");
-  res.json({
-    ok: true,
-    location: { latitude: lat, longitude: lng },
-    serverTime: new Date().toISOString(),
-    data,
-  });
 });
 
 export default router;
