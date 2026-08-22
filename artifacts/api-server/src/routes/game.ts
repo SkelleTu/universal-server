@@ -45,6 +45,12 @@ function numberParam(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+// Public Street View is limited to the game's current playable city. This
+// keeps the Google key private without turning this route into an open proxy.
+function isWithinAraras(lat: number, lng: number): boolean {
+  return lat >= -22.48 && lat <= -22.24 && lng >= -47.52 && lng <= -47.25;
+}
+
 function streetViewKey(): string | null {
   const value = process.env.GOOGLE_MAPS_API_KEY?.trim();
   return value ? value : null;
@@ -53,7 +59,6 @@ function streetViewKey(): string | null {
 const gameVersion = process.env.GAME_VERSION ?? "0.1.0";
 const serverVersion = process.env.SERVER_VERSION ?? "1.0.0";
 const expirationAt = process.env.SERVER_EXPIRATION_AT ?? null;
-const streetViewMetadataCacheTtlMs = 24 * 60 * 60 * 1000;
 
 const cacheNamespaces = [
   "maps",
@@ -199,8 +204,7 @@ router.delete(
 
 router.get(
   "/game/streetview/metadata",
-  authenticate,
-  async (req: AuthedRequest, res): Promise<void> => {
+  async (req: Request, res): Promise<void> => {
     const key = streetViewKey();
     if (!key) {
       res.status(503).json({ error: "GOOGLE_MAPS_API_KEY não configurada" });
@@ -216,10 +220,8 @@ router.get(
       return;
     }
 
-    const cacheKey = `${lat.toFixed(6)},${lng.toFixed(6)},${radius}`;
-    const cached = await pgGetGameCache(req.project!.id, "streetview", cacheKey);
-    if (cached) {
-      res.json({ hit: true, source: "cache", data: cached.data });
+    if (!isWithinAraras(lat, lng)) {
+      res.status(403).json({ error: "Public Street View is available only in Araras, SP" });
       return;
     }
 
@@ -255,24 +257,13 @@ router.get(
       fetchedAt: new Date().toISOString(),
     };
 
-    const expiresAt = new Date(Date.now() + streetViewMetadataCacheTtlMs).toISOString();
-    const row = await pgUpsertGameCache(
-      req.project!.id,
-      "streetview",
-      cacheKey,
-      safeData,
-      expiresAt,
-    );
-    sqMirrorUpsertGameCache(row.id, req.project!.id, "streetview", cacheKey, safeData, expiresAt);
-
     res.json({ hit: false, source: "google", data: safeData });
   },
 );
 
 router.get(
   "/game/streetview/image",
-  authenticate,
-  async (req: AuthedRequest, res): Promise<void> => {
+  async (req: Request, res): Promise<void> => {
     const key = streetViewKey();
     if (!key) {
       res.status(503).json({ error: "GOOGLE_MAPS_API_KEY não configurada" });
@@ -288,6 +279,16 @@ router.get(
     const width = Math.min(Math.max(Math.floor(numberParam(req.query.width, 640)), 1), 640);
     const height = Math.min(Math.max(Math.floor(numberParam(req.query.height, 400)), 1), 640);
     const radius = Math.min(Math.max(numberParam(req.query.radius, 50), 0), 100);
+
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      res.status(400).json({ error: "Valid lat/lng coordinates are required" });
+      return;
+    }
+
+    if (!isWithinAraras(lat, lng)) {
+      res.status(403).json({ error: "Public Street View is available only in Araras, SP" });
+      return;
+    }
 
     if (!pano && (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180)) {
       res.status(400).json({ error: "pano ou coordenadas lat/lng válidas são obrigatórios" });

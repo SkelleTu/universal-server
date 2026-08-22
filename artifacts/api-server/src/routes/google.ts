@@ -24,6 +24,10 @@ function key(): string | null {
   return value || null;
 }
 
+function isArarasAddress(address: string): boolean {
+  return /\bararas\b/i.test(address);
+}
+
 router.get("/game/google/capabilities", authenticate, (_req: AuthedRequest, res): void => {
   const configured = Boolean(key());
   res.json({
@@ -47,11 +51,12 @@ router.get("/game/google/capabilities", authenticate, (_req: AuthedRequest, res)
   });
 });
 
-router.get("/game/google/geocode", authenticate, async (req: AuthedRequest, res): Promise<void> => {
+router.get("/game/google/geocode", async (req: Request, res): Promise<void> => {
   const googleKey = key();
   const address = String(req.query.address ?? "").trim();
   if (!googleKey) { res.status(503).json({ error: "GOOGLE_MAPS_API_KEY não configurada" }); return; }
   if (!address) { res.status(400).json({ error: "address é obrigatório" }); return; }
+  if (!isArarasAddress(address)) { res.status(403).json({ error: "Public search is available only for Araras, SP addresses" }); return; }
   const params = new URLSearchParams({ address, key: googleKey });
   const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params.toString()}`);
   const payload = await response.json();
