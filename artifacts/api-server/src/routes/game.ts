@@ -53,6 +53,7 @@ function streetViewKey(): string | null {
 const gameVersion = process.env.GAME_VERSION ?? "0.1.0";
 const serverVersion = process.env.SERVER_VERSION ?? "1.0.0";
 const expirationAt = process.env.SERVER_EXPIRATION_AT ?? null;
+const streetViewMetadataCacheTtlMs = 24 * 60 * 60 * 1000;
 
 const cacheNamespaces = [
   "maps",
@@ -254,14 +255,15 @@ router.get(
       fetchedAt: new Date().toISOString(),
     };
 
+    const expiresAt = new Date(Date.now() + streetViewMetadataCacheTtlMs).toISOString();
     const row = await pgUpsertGameCache(
       req.project!.id,
       "streetview",
       cacheKey,
       safeData,
-      null,
+      expiresAt,
     );
-    sqMirrorUpsertGameCache(row.id, req.project!.id, "streetview", cacheKey, safeData, null);
+    sqMirrorUpsertGameCache(row.id, req.project!.id, "streetview", cacheKey, safeData, expiresAt);
 
     res.json({ hit: false, source: "google", data: safeData });
   },
@@ -279,6 +281,7 @@ router.get(
 
     const lat = Number(req.query.lat);
     const lng = Number(req.query.lng);
+    const pano = String(req.query.pano ?? "").trim();
     const heading = ((numberParam(req.query.heading, 0) % 360) + 360) % 360;
     const pitch = Math.min(Math.max(numberParam(req.query.pitch, 0), -90), 90);
     const fov = Math.min(Math.max(numberParam(req.query.fov, 90), 10), 120);
@@ -286,22 +289,27 @@ router.get(
     const height = Math.min(Math.max(Math.floor(numberParam(req.query.height, 400)), 1), 640);
     const radius = Math.min(Math.max(numberParam(req.query.radius, 50), 0), 100);
 
-    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
-      res.status(400).json({ error: "lat e lng válidos são obrigatórios" });
+    if (!pano && (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180)) {
+      res.status(400).json({ error: "pano ou coordenadas lat/lng válidas são obrigatórios" });
       return;
     }
 
     const params = new URLSearchParams({
       size: `${width}x${height}`,
-      location: `${lat},${lng}`,
       heading: String(heading),
       pitch: String(pitch),
       fov: String(fov),
-      radius: String(radius),
-      source: "outdoor",
       return_error_code: "true",
       key,
     });
+
+    if (pano) {
+      params.set("pano", pano);
+    } else {
+      params.set("location", `${lat},${lng}`);
+      params.set("radius", String(radius));
+      params.set("source", "outdoor");
+    }
 
     const response = await fetch(`https://maps.googleapis.com/maps/api/streetview?${params.toString()}`);
     const contentType = response.headers.get("content-type") ?? "image/jpeg";
