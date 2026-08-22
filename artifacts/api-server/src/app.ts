@@ -29,14 +29,23 @@ app.use(
   }),
 );
 
-const configuredOrigins = (process.env.CORS_ORIGINS ?? "*")
+const isProduction = process.env.NODE_ENV === "production";
+const configuredOrigins = (process.env.CORS_ORIGINS ?? "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+if (isProduction && configuredOrigins.includes("*")) {
+  throw new Error("CORS_ORIGINS must not contain '*' in production.");
+}
+
 app.use(
   cors({
-    origin: configuredOrigins.includes("*") ? true : configuredOrigins,
+    origin: isProduction
+      ? configuredOrigins
+      : configuredOrigins.length > 0
+        ? configuredOrigins
+        : true,
     credentials: true,
   }),
 );
