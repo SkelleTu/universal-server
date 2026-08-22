@@ -49,8 +49,7 @@ async function createBlob(token: string, repo: string, data: Buffer): Promise<st
 export async function createDurableBackup(): Promise<BackupManifest | null> {
   const c = config(); if (!c) return null;
   const snapshot = await pgExportSnapshot(); const encrypted = encrypt(snapshot, c.key);
-  const parentRef = await github(c.token, `/repos/${c.repo}/git/ref/heads/main`); const parentSha = parentRef.object.sha as string;
-  const parentCommit = await github(c.token, `/repos/${c.repo}/git/commits/${parentSha}`);
+  const base = await getMainBase(c.token, c.repo);
   const treeEntries: Array<{ path: string; mode: string; type: string; sha: string }> = [];
   let chunkCount = 0;
   for (let offset = 0; offset < encrypted.length; offset += CHUNK_BYTES) {
@@ -61,9 +60,17 @@ export async function createDurableBackup(): Promise<BackupManifest | null> {
   const preliminary: BackupManifest = { schemaVersion: 1, createdAt: snapshot.createdAt, encrypted: true, algorithm: "aes-256-gcm", compression: "gzip", chunkCount, bytes: encrypted.length };
   const manifestSha = await createBlob(c.token, c.repo, Buffer.from(JSON.stringify(preliminary, null, 2)));
   treeEntries.push({ path: `${BACKUP_PREFIX}/latest.json`, mode: "100644", type: "blob", sha: manifestSha });
-  const tree = await github(c.token, `/repos/${c.repo}/git/trees`, { method: "POST", body: JSON.stringify({ base_tree: parentCommit.tree.sha, tree: treeEntries }) });
-  const commit = await github(c.token, `/repos/${c.repo}/git/commits`, { method: "POST", body: JSON.stringify({ message: `chore(backup): universal-server snapshot ${snapshot.createdAt}`, tree: tree.sha, parents: [parentSha] }) });
-  await github(c.token, `/repos/${c.repo}/git/refs/heads/main`, { method: "PATCH", body: JSON.stringify({ sha: commit.sha }) });
+  const treePayload: Record<string, unknown> = { tree: treeEntries };
+  if (base) treePayload.base_tree = base.baseTreeSha;
+  const tree = await github(c.token, `/repos/${c.repo}/git/trees`, { method: "POST", body: JSON.stringify(treePayload) });
+  const commitPayload: Record<string, unknown> = { message: `chore(backup): universal-server snapshot ${snapshot.createdAt}`, tree: tree.sha };
+  if (base) commitPayload.parents = [base.parentSha];
+  const commit = await github(c.token, `/repos/${c.repo}/git/commits`, { method: "POST", body: JSON.stringify(commitPayload) });
+  if (base) {
+    await github(c.token, `/repos/${c.repo}/git/refs/heads/main`, { method: "PATCH", body: JSON.stringify({ sha: commit.sha }) });
+  } else {
+    await github(c.token, `/repos/${c.repo}/git/refs`, { method: "POST", body: JSON.stringify({ ref: "refs/heads/main", sha: commit.sha }) });
+  }
   logger.info({ commitSha: commit.sha, bytes: encrypted.length, chunks: chunkCount }, "Durable backup completed");
   return preliminary;
 }
@@ -71,6 +78,20 @@ export async function createDurableBackup(): Promise<BackupManifest | null> {
 async function getContent(token: string, repo: string, path: string): Promise<Buffer> {
   const file = await github(token, `/repos/${repo}/contents/${path}?ref=main`);
   return Buffer.from(String(file.content).replace(/\n/g, ""), "base64");
+}
+
+async function getMainBase(token: string, repo: string): Promise<{ parentSha: string; baseTreeSha: string } | null> {
+  try {
+    const parentRef = await github(token, `/repos/${repo}/git/ref/heads/main`);
+    const parentSha = parentRef.object.sha as string;
+    const parentCommit = await github(token, `/repos/${repo}/git/commits/${parentSha}`);
+    return { parentSha, baseTreeSha: parentCommit.tree.sha as string };
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("GitHub backup API 409") && err.message.includes("Git Repository is empty")) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 export async function restoreLatestBackupIfNeeded(): Promise<boolean> {
