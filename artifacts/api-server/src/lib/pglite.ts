@@ -60,6 +60,11 @@ export async function pgInsertProject(name: string, description: string | null):
   const apiKey = crypto.randomBytes(32).toString("hex");
   const res = await pg().query<Project>("INSERT INTO projects (name, description, api_key) VALUES ($1, $2, $3) RETURNING id, name, description, api_key, created_at::text", [name, description, apiKey]); return res.rows[0];
 }
+export async function pgGetOrCreateSystemProject(): Promise<Project> {
+  const name = "Clamour public game";
+  const existing = await pg().query<Project>("SELECT id, name, description, api_key, created_at::text FROM projects WHERE name = $1", [name]);
+  return existing.rows[0] ?? pgInsertProject(name, "Internal project for public player accounts.");
+}
 export async function pgDeleteProject(id: number): Promise<boolean> { const res = await pg().query("DELETE FROM projects WHERE id = $1 RETURNING id", [id]); return (res.rows?.length ?? 0) > 0; }
 
 export async function pgListCollection(projectId: number, collection: string): Promise<CollectionRow[]> {

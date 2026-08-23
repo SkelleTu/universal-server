@@ -7,6 +7,7 @@ import weatherRouter from "./weather";
 import googleRouter from "./google";
 import playerStateRouter from "./player-state";
 import multiplayerRouter from "./multiplayer";
+import authRouter from "./auth";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(weatherRouter);
 router.use(googleRouter);
 router.use(playerStateRouter);
 router.use(multiplayerRouter);
+router.use(authRouter);
 
 export default router;
