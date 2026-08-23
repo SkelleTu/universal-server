@@ -70,8 +70,6 @@ async function readContent(pathname: string): Promise<{ data: Buffer; sha: strin
   if (!payload.sha) throw new Error("GitHub database file response did not include a SHA");
   if (payload.content) return { data: Buffer.from(payload.content.replace(/\n/g, ""), "base64"), sha: payload.sha };
 
-  // Contents API omits `content` for larger files. Fetch the Git blob directly,
-  // which supports blobs up to GitHub's 100 MB file limit.
   const blob = await github(`/repos/${config().repo}/git/blobs/${payload.sha}`);
   if (!blob.ok) throw new Error(`GitHub database blob read failed (${blob.status}): ${await blob.text()}`);
   const blobPayload = (await blob.json()) as { content?: string; encoding?: string };
@@ -231,11 +229,23 @@ export async function initGitHubDatabase(): Promise<void> {
   if (state) return;
   const current = await readContent(DATABASE_PATH);
   if (current) {
-    state = decrypt(current.data, config().key);
-    fileSha = current.sha;
-    lastPersistAt = new Date().toISOString();
-    logger.info({ repository: config().repo, path: DATABASE_PATH }, "GitHub database loaded");
-    return;
+    try {
+      state = decrypt(current.data, config().key);
+      fileSha = current.sha;
+      lastPersistAt = new Date().toISOString();
+      logger.info({ repository: config().repo, path: DATABASE_PATH }, "GitHub database loaded");
+      return;
+    } catch (err) {
+      logger.warn({ err }, "Current GitHub database is invalid; attempting legacy backup migration");
+      fileSha = current.sha;
+      const legacy = await loadLegacyBackup();
+      if (!legacy) throw err;
+      state = legacy;
+      dirty = true;
+      await enqueuePersist();
+      logger.info({ repository: config().repo, path: DATABASE_PATH, migratedLegacyBackup: true }, "GitHub database migrated from legacy backup");
+      return;
+    }
   }
   const legacy = await loadLegacyBackup();
   state = legacy ?? emptyState();
