@@ -36,8 +36,12 @@ export type Stats = { requestsToday: number; totalCollections: number; totalProj
 // database now lives in GitHub. No PGlite/WASM or local database is created.
 export async function initPGlite(): Promise<void> { await initGitHubDatabase(); }
 export async function pgListProjects(): Promise<Project[]> { return listProjects(); }
-export async function pgGetProjectByApiKey(apiKey: string): Promise<Project | null> { return getProjectByApiKey(apiKey); }
-export async function pgInsertProject(name: string, description: string | null): Promise<Project> { return createProject(name, description); }
+export async function pgGetProjectByApiKey(apiKey: string): Promise<Project | null> { return getProjectByApiKey(apiKey.trim()); }
+export async function pgInsertProject(name: string, description: string | null): Promise<Project> {
+  const project = await createProject(name, description);
+  await flushGitHubDatabase("project-create");
+  return project;
+}
 export async function pgGetOrCreateSystemProject(): Promise<Project> { return getOrCreateSystemProject(); }
 export async function pgDeleteProject(id: number): Promise<boolean> { return deleteProject(id); }
 export async function pgListCollection(projectId: number, collection: string, limit = 1000): Promise<CollectionRow[]> { return listCollection(projectId, collection, limit); }
