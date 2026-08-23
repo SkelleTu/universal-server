@@ -233,7 +233,17 @@ router.get(
     });
 
     const response = await fetch(`https://maps.googleapis.com/maps/api/streetview/metadata?${params.toString()}`);
-    const payload = (await response.json()) as Record<string, unknown>;
+    const rawPayload = await response.text();
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(rawPayload) as Record<string, unknown>;
+    } catch {
+      res.status(502).json({
+        error: "Street View metadata returned an invalid response",
+        details: rawPayload.slice(0, 500),
+      });
+      return;
+    }
     const status = String(payload.status ?? "UNKNOWN");
 
     if (!response.ok || status !== "OK") {
