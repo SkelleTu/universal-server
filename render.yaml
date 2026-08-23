@@ -5,7 +5,7 @@ services:
     plan: free
     region: oregon
     numInstances: 1
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build:render
+    buildCommand: pnpm install --frozen-lockfile && pnpm run build:render
     startCommand: pnpm start
     healthCheckPath: /api/healthz
     autoDeployTrigger: commit
