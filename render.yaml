@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: pnpm install --frozen-lockfile && pnpm run build:render
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build:render
     startCommand: pnpm start
     healthCheckPath: /api/healthz
     autoDeployTrigger: commit
@@ -12,6 +12,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: 24.14.1
       - key: BACKUP_GITHUB_REPO
         value: SkelleTu/universal-server-backups
       - key: BACKUP_GITHUB_TOKEN
