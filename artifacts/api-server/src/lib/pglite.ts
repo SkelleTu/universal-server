@@ -14,6 +14,7 @@ import {
   listCollection,
   getCollectionItem,
   getGameCache,
+  listGameCache,
   listGameCacheSince,
   getStats,
   databaseSnapshot,
@@ -43,7 +44,7 @@ export async function pgInsertCollectionItem(projectId: number, collection: stri
 export async function pgUpdateCollectionItem(projectId: number, collection: string, id: number, data: Record<string, unknown>): Promise<CollectionRow | null> { return updateCollection(projectId, collection, id, data); }
 export async function pgDeleteCollectionItem(projectId: number, collection: string, id: number): Promise<boolean> { return deleteCollection(projectId, collection, id); }
 export async function pgGetGameCache(projectId: number, namespace: string, cacheKey: string): Promise<GameCacheRow | null> { return getGameCache(projectId, namespace, cacheKey); }
-export async function pgListGameCache(projectId: number, namespace: string, limit = 100): Promise<GameCacheRow[]> { return getStats ? listGameCache(projectId, namespace, limit) : []; }
+export async function pgListGameCache(projectId: number, namespace: string, limit = 100): Promise<GameCacheRow[]> { return listGameCache(projectId, namespace, limit); }
 export async function pgListGameCacheSince(projectId: number, namespace: string, since: string, limit = 100): Promise<GameCacheRow[]> { return listGameCacheSince(projectId, namespace, since, limit); }
 export async function pgUpsertGameCache(projectId: number, namespace: string, cacheKey: string, data: Record<string, unknown>, expiresAt: string | null): Promise<GameCacheRow> { return upsertGameCache(projectId, namespace, cacheKey, data, expiresAt); }
 export async function pgDeleteGameCache(projectId: number, namespace: string, cacheKey: string): Promise<boolean> { return deleteGameCache(projectId, namespace, cacheKey); }
