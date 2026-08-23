@@ -16,7 +16,7 @@ services:
         value: SkelleTu/universal-server-backups
       - key: BACKUP_GITHUB_TOKEN
         sync: false
-      - key: BACKUP_ENCRYPTION_KEY
+      - key: UNIVERSAL_SERVER_BACKUP_ENCRYPTION_KEY
         sync: false
       - key: BACKUP_INTERVAL_MS
         value: "900000"
