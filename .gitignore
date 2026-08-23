@@ -55,3 +55,4 @@ artifacts/api-server/dist/
 .env
 .env.*
 !.env.example
+UNIVERSAL_SERVER_BACKUP_ENCRYPTION_KEY.txt
