@@ -4,6 +4,7 @@ services:
     runtime: node
     plan: free
     region: oregon
+    numInstances: 1
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm run build:render
     startCommand: pnpm start
     healthCheckPath: /api/healthz
@@ -22,5 +23,3 @@ services:
         sync: false
       - key: UNIVERSAL_SERVER_BACKUP_ENCRYPTION_KEY
         sync: false
-      - key: BACKUP_INTERVAL_MS
-        value: "900000"
