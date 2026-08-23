@@ -3,7 +3,6 @@
   "version": "0.0.0",
   "license": "MIT",
   "scripts": {
-    "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
     "build": "PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build && pnpm --filter @workspace/api-server run build",
     "build:checked": "pnpm run typecheck && pnpm run build",
     "build:render": "pnpm run build",
@@ -13,8 +12,8 @@
   },
   "private": true,
   "engines": {
-    "node": ">=24 <25",
-    "pnpm": ">=10"
+    "node": ">=24.14.1 <25",
+    "pnpm": ">=10.26.1 <11"
   },
   "packageManager": "pnpm@10.26.1",
   "dependencies": {
