@@ -29,12 +29,8 @@ async function backupNow(reason: string): Promise<void> {
     await initPGlite();
     await restoreLatestBackupIfNeeded();
 
-    app.listen(port, (err?: Error) => {
-      if (err) {
-        logger.error({ err }, "Error listening on port");
-        process.exit(1);
-      }
-      logger.info({ port, durableBackupConfigured: durableBackupConfigured(), backupIntervalMs }, "Server listening");
+    app.listen(port, "0.0.0.0", () => {
+      logger.info({ host: "0.0.0.0", port, durableBackupConfigured: durableBackupConfigured(), backupIntervalMs }, "Server listening");
     });
 
     if (durableBackupConfigured()) {
@@ -42,7 +38,9 @@ async function backupNow(reason: string): Promise<void> {
       setInterval(() => void backupNow("scheduled"), backupIntervalMs);
     }
 
-    const gracefulBackup = () => void backupNow("shutdown");
+    const gracefulBackup = () => {
+      void backupNow("shutdown");
+    };
     process.once("SIGTERM", gracefulBackup);
     process.once("SIGINT", gracefulBackup);
   } catch (err) {
