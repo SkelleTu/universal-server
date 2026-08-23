@@ -1,0 +1,1 @@
+This file intentionally contains no secret. Configure the secret as the Render environment variable UNIVERSAL_SERVER_BACKUP_ENCRYPTION_KEY.
