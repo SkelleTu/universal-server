@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    buildCommand: pnpm install --frozen-lockfile && pnpm run build:render
     startCommand: pnpm start
     healthCheckPath: /api/healthz
     autoDeployTrigger: commit
