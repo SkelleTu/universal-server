@@ -14,7 +14,6 @@ import {
   listCollection,
   getCollectionItem,
   getGameCache,
-  listGameCache,
   listGameCacheSince,
   getStats,
   databaseSnapshot,
@@ -27,21 +26,15 @@ import {
   type CollectionRow,
   type GameCacheRow,
   type DatabaseSnapshot,
-} from "./github-db-v2";
+} from "./github-db-v3";
 
-export type { Project, CollectionRow, GameCacheRow, DatabaseSnapshot } from "./github-db-v2";
+export type { Project, CollectionRow, GameCacheRow, DatabaseSnapshot } from "./github-db-v3";
 export type Stats = { requestsToday: number; totalCollections: number; totalProjects: number; totalGameCacheEntries: number };
 
-// Compatibility facade: existing routes keep their pg* API, but the primary
-// database now lives in GitHub. No PGlite/WASM or local database is created.
 export async function initPGlite(): Promise<void> { await initGitHubDatabase(); }
 export async function pgListProjects(): Promise<Project[]> { return listProjects(); }
 export async function pgGetProjectByApiKey(apiKey: string): Promise<Project | null> { return getProjectByApiKey(apiKey.trim()); }
-export async function pgInsertProject(name: string, description: string | null): Promise<Project> {
-  const project = await createProject(name, description);
-  await flushGitHubDatabase("project-create");
-  return project;
-}
+export async function pgInsertProject(name: string, description: string | null): Promise<Project> { return createProject(name, description); }
 export async function pgGetOrCreateSystemProject(): Promise<Project> { return getOrCreateSystemProject(); }
 export async function pgDeleteProject(id: number): Promise<boolean> { return deleteProject(id); }
 export async function pgListCollection(projectId: number, collection: string, limit = 1000): Promise<CollectionRow[]> { return listCollection(projectId, collection, limit); }
@@ -55,7 +48,7 @@ export async function pgListGameCacheSince(projectId: number, namespace: string,
 export async function pgUpsertGameCache(projectId: number, namespace: string, cacheKey: string, data: Record<string, unknown>, expiresAt: string | null): Promise<GameCacheRow> { return upsertGameCache(projectId, namespace, cacheKey, data, expiresAt); }
 export async function pgDeleteGameCache(projectId: number, namespace: string, cacheKey: string): Promise<boolean> { return deleteGameCache(projectId, namespace, cacheKey); }
 export async function pgGetDatabaseHealth(): Promise<{ ok: boolean; latencyMs: number }> { return githubDatabaseHealth(); }
-export function pgLogRequest(projectId: number, method: string, endpoint: string): void { insertLog(projectId, method, endpoint); }
+export function pgLogRequest(projectId: number, method: string, endpoint: string): void { void insertLog(projectId, method, endpoint); }
 export async function pgGetStats(): Promise<Stats> { return getStats(); }
 export async function pgHasPersistentData(): Promise<boolean> { return databaseHasPersistentData(); }
 export async function pgExportSnapshot(): Promise<DatabaseSnapshot> { return databaseSnapshot(); }
