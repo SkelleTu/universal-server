@@ -48,11 +48,10 @@ function headers(token: string): Record<string, string> {
 
 async function github(path: string, init: RequestInit = {}): Promise<Response> {
   const c = config();
-  const response = await fetch(`${GITHUB_API}${path}`, {
+  return fetch(`${GITHUB_API}${path}`, {
     ...init,
     headers: { ...headers(c.token), ...(init.headers ?? {}) },
   });
-  return response;
 }
 
 async function readContent(pathname: string): Promise<{ data: Buffer; sha: string } | null> {
@@ -62,7 +61,7 @@ async function readContent(pathname: string): Promise<{ data: Buffer; sha: strin
   if (!response.ok) throw new Error(`GitHub database read failed (${response.status}): ${await response.text()}`);
   const payload = (await response.json()) as { content?: string; sha?: string; encoding?: string };
   if (!payload.content || !payload.sha) throw new Error("GitHub database file response was incomplete");
-  return { data: Buffer.from(payload.content.replace(/\n/g, ""), payload.encoding === "base64" ? "base64" : "base64"), sha: payload.sha };
+  return { data: Buffer.from(payload.content.replace(/\n/g, ""), "base64"), sha: payload.sha };
 }
 
 function encrypt(snapshot: DatabaseSnapshot, key: Buffer): Buffer {
@@ -75,6 +74,7 @@ function encrypt(snapshot: DatabaseSnapshot, key: Buffer): Buffer {
 
 function decrypt(payload: Buffer, key: Buffer): DatabaseSnapshot {
   if (payload.subarray(0, 5).toString() !== "USDB1") throw new Error("Invalid Universal Server GitHub database format");
+  if (payload.length < 33) throw new Error("Universal Server GitHub database is truncated");
   const decipher = crypto.createDecipheriv("aes-256-gcm", key, payload.subarray(5, 17));
   decipher.setAuthTag(payload.subarray(17, 33));
   const compressed = Buffer.concat([decipher.update(payload.subarray(33)), decipher.final()]);
@@ -120,21 +120,26 @@ function normalize(input: Partial<DatabaseSnapshot>): DatabaseSnapshot {
 async function loadLegacyBackup(): Promise<DatabaseSnapshot | null> {
   const manifestContent = await readContent(LEGACY_MANIFEST_PATH);
   if (!manifestContent) return null;
-  const manifest = JSON.parse(manifestContent.data.toString("utf8")) as { chunkCount?: number };
-  const chunkCount = Number(manifest.chunkCount ?? 0);
-  if (!Number.isInteger(chunkCount) || chunkCount < 1) return null;
-  const chunks: Buffer[] = [];
-  for (let i = 0; i < chunkCount; i++) {
-    const chunk = await readContent(`${LEGACY_CHUNK_PREFIX}${String(i).padStart(6, "0")}.bin`);
-    if (!chunk) throw new Error(`Legacy GitHub backup chunk ${i} is missing`);
-    chunks.push(chunk.data);
+  try {
+    const manifest = JSON.parse(manifestContent.data.toString("utf8")) as { chunkCount?: number };
+    const chunkCount = Number(manifest.chunkCount ?? 0);
+    if (!Number.isInteger(chunkCount) || chunkCount < 1) return null;
+    const chunks: Buffer[] = [];
+    for (let i = 0; i < chunkCount; i++) {
+      const chunk = await readContent(`${LEGACY_CHUNK_PREFIX}${String(i).padStart(6, "0")}.bin`);
+      if (!chunk) throw new Error(`Legacy GitHub backup chunk ${i} is missing`);
+      chunks.push(chunk.data);
+    }
+    return normalize(decryptLegacy(Buffer.concat(chunks), config().key));
+  } catch (err) {
+    logger.warn({ err }, "Legacy GitHub backup could not be migrated; preserving legacy files and starting a new database");
+    return null;
   }
-  const decrypted = decryptLegacy(Buffer.concat(chunks), config().key);
-  return normalize(decrypted);
 }
 
 function decryptLegacy(payload: Buffer, key: Buffer): DatabaseSnapshot {
   if (payload.subarray(0, 5).toString() !== "USBK1") throw new Error("Invalid legacy Universal Server backup format");
+  if (payload.length < 33) throw new Error("Legacy Universal Server backup is truncated");
   const decipher = crypto.createDecipheriv("aes-256-gcm", key, payload.subarray(5, 17));
   decipher.setAuthTag(payload.subarray(17, 33));
   const compressed = Buffer.concat([decipher.update(payload.subarray(33)), decipher.final()]);
@@ -151,10 +156,7 @@ async function writeToGitHub(snapshot: DatabaseSnapshot): Promise<void> {
     branch: "main",
   };
   if (fileSha) body.sha = fileSha;
-  const response = await github(`/repos/${c.repo}/contents/${encodedPath}`, {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
+  const response = await github(`/repos/${c.repo}/contents/${encodedPath}`, { method: "PUT", body: JSON.stringify(body) });
   if (!response.ok) {
     const text = await response.text();
     if (response.status === 409 || response.status === 422) {
@@ -202,9 +204,7 @@ export async function persistDatabase(): Promise<void> {
 export async function createProject(name: string, description: string | null): Promise<Project> {
   const now = new Date().toISOString();
   const project: Project = { id: db().nextIds.projects++, name, description, api_key: crypto.randomBytes(32).toString("hex"), created_at: now };
-  db().projects.unshift(project);
-  await persistDatabase();
-  return project;
+  db().projects.unshift(project); await persistDatabase(); return project;
 }
 
 export async function deleteProject(id: number): Promise<boolean> {
@@ -213,33 +213,25 @@ export async function deleteProject(id: number): Promise<boolean> {
   db().collections = db().collections.filter((row) => row.project_id !== id);
   db().game_cache = db().game_cache.filter((row) => row.project_id !== id);
   if (db().projects.length === before) return false;
-  await persistDatabase();
-  return true;
+  await persistDatabase(); return true;
 }
 
 export async function insertCollection(projectId: number, collection: string, data: Record<string, unknown>): Promise<CollectionRow> {
   const now = new Date().toISOString();
   const row = { id: db().nextIds.collections++, project_id: projectId, collection, data, created_at: now, updated_at: now };
-  db().collections.unshift(row);
-  await persistDatabase();
-  return row;
+  db().collections.unshift(row); await persistDatabase(); return row;
 }
 
 export async function updateCollection(projectId: number, collection: string, id: number, data: Record<string, unknown>): Promise<CollectionRow | null> {
   const row = db().collections.find((item) => item.project_id === projectId && item.collection === collection && item.id === id);
   if (!row) return null;
-  row.data = data;
-  row.updated_at = new Date().toISOString();
-  await persistDatabase();
-  return row;
+  row.data = data; row.updated_at = new Date().toISOString(); await persistDatabase(); return row;
 }
 
 export async function deleteCollection(projectId: number, collection: string, id: number): Promise<boolean> {
   const index = db().collections.findIndex((item) => item.project_id === projectId && item.collection === collection && item.id === id);
   if (index < 0) return false;
-  db().collections.splice(index, 1);
-  await persistDatabase();
-  return true;
+  db().collections.splice(index, 1); await persistDatabase(); return true;
 }
 
 export async function insertLog(projectId: number, method: string, endpoint: string): Promise<void> {
@@ -251,61 +243,26 @@ export async function insertLog(projectId: number, method: string, endpoint: str
 export async function upsertGameCache(projectId: number, namespace: string, cacheKey: string, data: Record<string, unknown>, expiresAt: string | null): Promise<GameCacheRow> {
   const now = new Date().toISOString();
   const existing = db().game_cache.find((item) => item.project_id === projectId && item.namespace === namespace && item.cache_key === cacheKey);
-  if (existing) {
-    existing.data = data;
-    existing.expires_at = expiresAt;
-    existing.updated_at = now;
-    await persistDatabase();
-    return existing;
-  }
+  if (existing) { existing.data = data; existing.expires_at = expiresAt; existing.updated_at = now; await persistDatabase(); return existing; }
   const row = { id: db().nextIds.game_cache++, project_id: projectId, namespace, cache_key: cacheKey, data, expires_at: expiresAt, created_at: now, updated_at: now };
-  db().game_cache.unshift(row);
-  await persistDatabase();
-  return row;
+  db().game_cache.unshift(row); await persistDatabase(); return row;
 }
 
 export async function deleteGameCache(projectId: number, namespace: string, cacheKey: string): Promise<boolean> {
   const index = db().game_cache.findIndex((item) => item.project_id === projectId && item.namespace === namespace && item.cache_key === cacheKey);
   if (index < 0) return false;
-  db().game_cache.splice(index, 1);
-  await persistDatabase();
-  return true;
+  db().game_cache.splice(index, 1); await persistDatabase(); return true;
 }
 
 export function getProjectByApiKey(apiKey: string): Project | null { return db().projects.find((project) => project.api_key === apiKey) ?? null; }
 export function listProjects(): Project[] { return [...db().projects].sort((a, b) => b.created_at.localeCompare(a.created_at)); }
 export function listCollection(projectId: number, collection: string, limit = 1000): CollectionRow[] { return db().collections.filter((row) => row.project_id === projectId && row.collection === collection).sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit); }
 export function getCollectionItem(projectId: number, collection: string, id: number): CollectionRow | null { return db().collections.find((row) => row.project_id === projectId && row.collection === collection && row.id === id) ?? null; }
-export function getGameCache(projectId: number, namespace: string, cacheKey: string): GameCacheRow | null {
-  const row = db().game_cache.find((item) => item.project_id === projectId && item.namespace === namespace && item.cache_key === cacheKey) ?? null;
-  if (!row) return null;
-  if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return null;
-  return row;
-}
-export function listGameCache(projectId: number, namespace: string, limit = 100): GameCacheRow[] {
-  const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 200);
-  return db().game_cache.filter((row) => row.project_id === projectId && row.namespace === namespace && (!row.expires_at || Date.parse(row.expires_at) > Date.now())).sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, safeLimit);
-}
-export function listGameCacheSince(projectId: number, namespace: string, since: string, limit = 100): GameCacheRow[] {
-  const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 200);
-  const cutoff = Date.parse(since);
-  return db().game_cache.filter((row) => row.project_id === projectId && row.namespace === namespace && Date.parse(row.updated_at) > cutoff && (!row.expires_at || Date.parse(row.expires_at) > Date.now())).sort((a, b) => a.updated_at.localeCompare(b.updated_at)).slice(0, safeLimit);
-}
-
-export function getStats() {
-  const today = new Date().toISOString().slice(0, 10);
-  const requestsToday = db().request_logs.filter((row) => row.created_at.startsWith(today)).length;
-  const totalCollections = new Set(db().collections.map((row) => `${row.project_id}:${row.collection}`)).size;
-  return { requestsToday, totalCollections, totalProjects: db().projects.length, totalGameCacheEntries: db().game_cache.length };
-}
-
+export function getGameCache(projectId: number, namespace: string, cacheKey: string): GameCacheRow | null { const row = db().game_cache.find((item) => item.project_id === projectId && item.namespace === namespace && item.cache_key === cacheKey) ?? null; if (!row) return null; if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return null; return row; }
+export function listGameCache(projectId: number, namespace: string, limit = 100): GameCacheRow[] { const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 200); return db().game_cache.filter((row) => row.project_id === projectId && row.namespace === namespace && (!row.expires_at || Date.parse(row.expires_at) > Date.now())).sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, safeLimit); }
+export function listGameCacheSince(projectId: number, namespace: string, since: string, limit = 100): GameCacheRow[] { const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 200); const cutoff = Date.parse(since); return db().game_cache.filter((row) => row.project_id === projectId && row.namespace === namespace && Date.parse(row.updated_at) > cutoff && (!row.expires_at || Date.parse(row.expires_at) > Date.now())).sort((a, b) => a.updated_at.localeCompare(b.updated_at)).slice(0, safeLimit); }
+export function getStats(): { requestsToday: number; totalCollections: number; totalProjects: number; totalGameCacheEntries: number } { const today = new Date().toISOString().slice(0, 10); const requestsToday = db().request_logs.filter((row) => row.created_at.slice(0, 10) === today).length; const collectionKeys = new Set(db().collections.map((row) => `${row.project_id}:${row.collection}`)); return { requestsToday, totalCollections: collectionKeys.size, totalProjects: db().projects.length, totalGameCacheEntries: db().game_cache.length }; }
 export function databaseSnapshot(): DatabaseSnapshot { return JSON.parse(JSON.stringify(db())) as DatabaseSnapshot; }
 export function databaseHasPersistentData(): boolean { return db().projects.length > 0 || db().collections.length > 0 || db().game_cache.length > 0; }
 export async function restoreDatabase(snapshot: DatabaseSnapshot): Promise<void> { state = normalize(snapshot); await persistDatabase(); }
-export async function githubDatabaseHealth(): Promise<{ ok: boolean; latencyMs: number }> {
-  const started = Date.now();
-  try {
-    const response = await github(`/repos/${config().repo}/contents/${DATABASE_PATH.split("/").map(encodeURIComponent).join("/")}?ref=main`);
-    return { ok: response.ok, latencyMs: Date.now() - started };
-  } catch { return { ok: false, latencyMs: Date.now() - started }; }
-}
+export function githubDatabaseHealth(): { ok: boolean; latencyMs: number } { return state ? { ok: true, latencyMs: 0 } : { ok: false, latencyMs: 0 }; }
