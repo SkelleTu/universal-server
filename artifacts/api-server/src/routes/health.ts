@@ -1,11 +1,12 @@
 import { Router, type IRouter } from "express";
-import { pgGetDatabaseHealth } from "../lib/pglite";
+import { pgGetDatabaseHealth, pgPersistenceStatus } from "../lib/pglite";
 
 const router: IRouter = Router();
 const startTime = Date.now();
 
 router.get("/healthz", async (_req, res): Promise<void> => {
   const github = await pgGetDatabaseHealth();
+  const persistence = pgPersistenceStatus();
   const healthy = github.ok;
   res.status(healthy ? 200 : 503).json({
     status: healthy ? "ok" : "degraded",
@@ -16,6 +17,9 @@ router.get("/healthz", async (_req, res): Promise<void> => {
     persistence: {
       primary: "github",
       encrypted: true,
+      dirty: persistence.dirty,
+      lastPersistAt: persistence.lastPersistAt,
+      lastPersistError: persistence.lastPersistError,
     },
   });
 });
