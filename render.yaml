@@ -9,7 +9,6 @@ services:
     startCommand: pnpm start
     healthCheckPath: /api/healthz
     autoDeployTrigger: commit
-    maxShutdownDelaySeconds: 60
     envVars:
       - key: NODE_ENV
         value: production
