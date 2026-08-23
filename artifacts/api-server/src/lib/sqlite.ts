@@ -5,10 +5,13 @@ import path from "path";
 import fs from "fs";
 import { logger } from "./logger";
 
-const VOLUME_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH;
-const DATA_DIR = VOLUME_PATH
-  ? path.join(VOLUME_PATH, "universal-server")
-  : path.resolve(process.cwd(), "data");
+const CONFIGURED_DATA_DIR = process.env.UNIVERSAL_SERVER_DATA_DIR?.trim();
+const RAILWAY_VOLUME_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH?.trim();
+const DATA_DIR = CONFIGURED_DATA_DIR
+  ? path.resolve(CONFIGURED_DATA_DIR)
+  : RAILWAY_VOLUME_PATH
+    ? path.join(RAILWAY_VOLUME_PATH, "universal-server")
+    : path.resolve(process.cwd(), "data");
 
 const SQLITE_PATH = path.join(DATA_DIR, "universal-server.db");
 
@@ -65,7 +68,7 @@ sqlite.exec(`
   CREATE INDEX IF NOT EXISTS idx_sq_game_cache ON game_cache(project_id, namespace, cache_key);
 `);
 
-logger.info({ path: SQLITE_PATH }, "SQLite mirror ready");
+logger.info({ path: SQLITE_PATH, configuredDataDir: CONFIGURED_DATA_DIR ?? null }, "SQLite mirror ready");
 
 // ── Espelhos de escrita (fire-and-forget) ─────────────────────────────────────
 
