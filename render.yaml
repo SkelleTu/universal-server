@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: universal-server
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm start
+    healthCheckPath: /api/healthz
+    autoDeployTrigger: commit
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BACKUP_GITHUB_REPO
+        value: SkelleTu/universal-server
+      - key: BACKUP_GITHUB_TOKEN
+        sync: false
+      - key: BACKUP_ENCRYPTION_KEY
+        sync: false
+      - key: BACKUP_INTERVAL_MS
+        value: "900000"
