@@ -69,7 +69,7 @@ export async function pgInsertProject(name: string, description: string | null):
 }
 export async function pgGetOrCreateSystemProject(): Promise<Project> {
   const name = "Clamour public game";
-  const existing = await pg().query<Project>("SELECT id, name, description, api_key, created_at::text FROM projects WHERE name = $1");
+  const existing = await pg().query<Project>("SELECT id, name, description, api_key, created_at::text FROM projects WHERE name = $1", [name]);
   return existing.rows[0] ?? pgInsertProject(name, "Internal project for public player accounts.");
 }
 export async function pgDeleteProject(id: number): Promise<boolean> { const res = await pg().query("DELETE FROM projects WHERE id = $1 RETURNING id", [id]); return (res.rows?.length ?? 0) > 0; }
@@ -127,7 +127,7 @@ export type DatabaseSnapshot = {
 };
 
 export async function pgHasPersistentData(): Promise<boolean> {
-  const result = await pg().query<{ projects: string; collections: string; cache: string }("SELECT (SELECT COUNT(*) FROM projects)::text AS projects, (SELECT COUNT(*) FROM collections)::text AS collections, (SELECT COUNT(*) FROM game_cache)::text AS cache");
+  const result = await pg().query<{ projects: string; collections: string; cache: string }>("SELECT (SELECT COUNT(*) FROM projects)::text AS projects, (SELECT COUNT(*) FROM collections)::text AS collections, (SELECT COUNT(*) FROM game_cache)::text AS cache");
   const row = result.rows[0]; return Number(row.projects) > 0 || Number(row.collections) > 0 || Number(row.cache) > 0;
 }
 
