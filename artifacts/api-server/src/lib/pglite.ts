@@ -5,7 +5,6 @@ import {
   insertCollection,
   updateCollection,
   deleteCollection,
-  insertLog,
   upsertGameCache,
   deleteGameCache,
   getProjectByApiKey,
@@ -31,9 +30,7 @@ export type Stats = { requestsToday: number; totalCollections: number; totalProj
 
 // Compatibility facade: existing routes keep their pg* API, but the primary
 // database now lives in GitHub. No PGlite/WASM or local database is created.
-export async function initPGlite(): Promise<void> {
-  await initGitHubDatabase();
-}
+export async function initPGlite(): Promise<void> { await initGitHubDatabase(); }
 
 export async function pgListProjects(): Promise<Project[]> { return listProjects(); }
 export async function pgGetProjectByApiKey(apiKey: string): Promise<Project | null> { return getProjectByApiKey(apiKey); }
@@ -57,9 +54,9 @@ export async function pgUpsertGameCache(projectId: number, namespace: string, ca
 export async function pgDeleteGameCache(projectId: number, namespace: string, cacheKey: string): Promise<boolean> { return deleteGameCache(projectId, namespace, cacheKey); }
 
 export async function pgGetDatabaseHealth(): Promise<{ ok: boolean; latencyMs: number }> { return githubDatabaseHealth(); }
-export function pgLogRequest(projectId: number, method: string, endpoint: string): void {
-  void insertLog(projectId, method, endpoint).catch(() => undefined);
-}
+// Request logging stays in-memory for the lifetime of the process. Persisting
+// every HTTP request as a Git commit would turn GitHub into a write bottleneck.
+export function pgLogRequest(_projectId: number, _method: string, _endpoint: string): void {}
 export async function pgGetStats(): Promise<Stats> { return getStats(); }
 export async function pgHasPersistentData(): Promise<boolean> { return databaseHasPersistentData(); }
 export async function pgExportSnapshot(): Promise<DatabaseSnapshot> { return databaseSnapshot(); }
