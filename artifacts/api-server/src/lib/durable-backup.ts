@@ -7,6 +7,7 @@ import { logger } from "./logger";
 const GITHUB_API = "https://api.github.com";
 const BACKUP_PREFIX = "runtime-backups";
 const CHUNK_BYTES = 500_000;
+const ENCRYPTION_ENV = "UNIVERSAL_SERVER_BACKUP_ENCRYPTION_KEY";
 
 type BackupManifest = {
   schemaVersion: 1; createdAt: string; encrypted: true; algorithm: "aes-256-gcm"; compression: "gzip"; chunkCount: number; bytes: number;
@@ -15,10 +16,10 @@ type BackupManifest = {
 function config(): { token: string; repo: string; key: Buffer } | null {
   const token = process.env.BACKUP_GITHUB_TOKEN?.trim();
   const repo = process.env.BACKUP_GITHUB_REPO?.trim();
-  const encodedKey = process.env.BACKUP_ENCRYPTION_KEY?.trim();
+  const encodedKey = process.env[ENCRYPTION_ENV]?.trim();
   if (!token || !repo || !encodedKey) return null;
   const key = Buffer.from(encodedKey, "base64");
-  if (key.length !== 32) throw new Error("BACKUP_ENCRYPTION_KEY must be base64-encoded 32 bytes");
+  if (key.length !== 32) throw new Error(`${ENCRYPTION_ENV} must be base64-encoded 32 bytes`);
   return { token, repo, key };
 }
 
