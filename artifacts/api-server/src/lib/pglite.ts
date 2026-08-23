@@ -6,8 +6,15 @@ import fs from "fs";
 import crypto from "crypto";
 import { logger } from "./logger";
 
-const VOLUME_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH;
-const DATA_DIR = VOLUME_PATH ? path.join(VOLUME_PATH, "universal-server") : path.resolve(process.cwd(), "data");
+// Portable storage path: Railway volumes remain supported, while Render/other hosts
+// can provide UNIVERSAL_SERVER_DATA_DIR when a persistent filesystem is available.
+const CONFIGURED_DATA_DIR = process.env.UNIVERSAL_SERVER_DATA_DIR?.trim();
+const RAILWAY_VOLUME_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH?.trim();
+const DATA_DIR = CONFIGURED_DATA_DIR
+  ? path.resolve(CONFIGURED_DATA_DIR)
+  : RAILWAY_VOLUME_PATH
+    ? path.join(RAILWAY_VOLUME_PATH, "universal-server")
+    : path.resolve(process.cwd(), "data");
 const PG_DIR = path.join(DATA_DIR, "postgres");
 
 if (!fs.existsSync(PG_DIR)) fs.mkdirSync(PG_DIR, { recursive: true });
@@ -37,7 +44,7 @@ export async function initPGlite(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_pg_logs ON request_logs(project_id);
     CREATE INDEX IF NOT EXISTS idx_pg_game_cache ON game_cache(project_id, namespace, cache_key);
   `);
-  logger.info({ dir: PG_DIR, volume: VOLUME_PATH ?? "local" }, "PGlite (embedded PostgreSQL) ready");
+  logger.info({ dir: PG_DIR, volume: RAILWAY_VOLUME_PATH ?? null, configuredDataDir: CONFIGURED_DATA_DIR ?? null }, "PGlite (embedded PostgreSQL) ready");
 }
 
 function pg(): PGlite {
@@ -62,7 +69,7 @@ export async function pgInsertProject(name: string, description: string | null):
 }
 export async function pgGetOrCreateSystemProject(): Promise<Project> {
   const name = "Clamour public game";
-  const existing = await pg().query<Project>("SELECT id, name, description, api_key, created_at::text FROM projects WHERE name = $1", [name]);
+  const existing = await pg().query<Project>("SELECT id, name, description, api_key, created_at::text FROM projects WHERE name = $1");
   return existing.rows[0] ?? pgInsertProject(name, "Internal project for public player accounts.");
 }
 export async function pgDeleteProject(id: number): Promise<boolean> { const res = await pg().query("DELETE FROM projects WHERE id = $1 RETURNING id", [id]); return (res.rows?.length ?? 0) > 0; }
@@ -120,7 +127,7 @@ export type DatabaseSnapshot = {
 };
 
 export async function pgHasPersistentData(): Promise<boolean> {
-  const result = await pg().query<{ projects: string; collections: string; cache: string }>("SELECT (SELECT COUNT(*) FROM projects)::text AS projects, (SELECT COUNT(*) FROM collections)::text AS collections, (SELECT COUNT(*) FROM game_cache)::text AS cache");
+  const result = await pg().query<{ projects: string; collections: string; cache: string }("SELECT (SELECT COUNT(*) FROM projects)::text AS projects, (SELECT COUNT(*) FROM collections)::text AS collections, (SELECT COUNT(*) FROM game_cache)::text AS cache");
   const row = result.rows[0]; return Number(row.projects) > 0 || Number(row.collections) > 0 || Number(row.cache) > 0;
 }
 
