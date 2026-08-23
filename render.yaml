@@ -13,7 +13,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: BACKUP_GITHUB_REPO
-        value: SkelleTu/universal-server
+        value: SkelleTu/universal-server-backups
       - key: BACKUP_GITHUB_TOKEN
         sync: false
       - key: BACKUP_ENCRYPTION_KEY
