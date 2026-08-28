@@ -6,7 +6,7 @@
     "build": "PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build && pnpm --filter @workspace/api-server run build",
     "build:checked": "pnpm run typecheck && pnpm run build",
     "build:render": "pnpm run build",
-    "start": "NODE_ENV=production node --enable-source-maps artifacts/api-server/dist/index.mjs",
+    "start": "node -r dotenv/config --enable-source-maps artifacts/api-server/dist/index.mjs",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
@@ -17,7 +17,8 @@
   },
   "packageManager": "pnpm@10.26.1",
   "dependencies": {
-    "@replit/connectors-sdk": "^0.4.1"
+    "@replit/connectors-sdk": "^0.4.1",
+    "dotenv": "^17.4.2"
   },
   "devDependencies": {
     "prettier": "^3.9.5",

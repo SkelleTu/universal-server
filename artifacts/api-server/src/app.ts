@@ -60,7 +60,8 @@ app.use("/api", router);
 // Em produção (Railway/Replit), o api-server serve o dashboard como SPA estática.
 // O build do dashboard gera os arquivos em artifacts/dashboard/dist/public/
 if (process.env.NODE_ENV === "production") {
-  const dashboardDist = path.resolve(process.cwd(), "artifacts/dashboard/dist/public");
+  const here = typeof __dirname !== "undefined" ? __dirname : process.cwd();
+  const dashboardDist = path.resolve(here, "../../../artifacts/dashboard/dist/public");
   app.use(express.static(dashboardDist));
   app.get("*path", (_req, res) => {
     res.sendFile(path.join(dashboardDist, "index.html"));

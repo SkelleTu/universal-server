@@ -75,6 +75,24 @@ router.get("/game/status", authenticate, async (req: AuthedRequest, res): Promis
   });
 });
 
+router.get("/game/public-url", (_req: Request, res: Response): void => {
+  const envUrl = process.env.CLAMOUR_PUBLIC_URL?.trim();
+  if (envUrl) {
+    res.json({ publicUrl: envUrl });
+    return;
+  }
+
+  const forwardedHost = String(_req.headers["x-forwarded-host"] || "").trim();
+  const forwardedServer = String(_req.headers["x-forwarded-server"] || "").trim();
+  const host = String(_req.headers["host"] || "").trim();
+
+  const candidate = forwardedHost || forwardedServer || host;
+  const isLocal = /^(127\.0\.0\.1|localhost|0\.0\.0\.0)(:\d+)?$/.test(candidate);
+  const publicUrl = isLocal ? "" : candidate ? `https://${candidate}` : "";
+
+  res.json({ publicUrl });
+});
+
 router.get("/game/manifest", authenticate, (_req: AuthedRequest, res): void => {
   res.json({
     service: "universal-server",
