@@ -1,5 +1,4 @@
-import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
-import { pgGetProjectByApiKey } from "../lib/pglite";
+import { Router, type IRouter, type Request, type Response, type NextFunction } from "../lib/pglite";
 
 const router: IRouter = Router();
 type AuthedRequest = Request & { project?: { id: number; name: string } };
