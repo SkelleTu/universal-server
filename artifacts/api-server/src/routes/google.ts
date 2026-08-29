@@ -1,4 +1,5 @@
-import { Router, type IRouter, type Request, type Response, type NextFunction } from "../lib/pglite";
+import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
+import { pgGetProjectByApiKey } from "../lib/pglite";
 
 const router: IRouter = Router();
 type AuthedRequest = Request & { project?: { id: number; name: string } };
@@ -61,6 +62,7 @@ router.get("/game/google/autocomplete", async (req: Request, res: Response): Pro
     input,
     includedRegionCodes: ["br"],
     languageCode: "pt-BR",
+    includedPrimaryTypes: ["street_address"],
     locationBias: {
       circle: {
         center: { latitude: -22.3574, longitude: -47.3841 },
