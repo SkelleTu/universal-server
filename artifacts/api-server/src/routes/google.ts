@@ -51,6 +51,120 @@ router.get("/game/google/capabilities", authenticate, (_req: AuthedRequest, res)
   });
 });
 
+router.get("/game/google/autocomplete", async (req: Request, res: Response): Promise<void> => {
+  const googleKey = key();
+  const input = String(req.query.input ?? "").trim();
+  const sessionToken = String(req.query.sessionToken ?? "").trim();
+  if (!googleKey) { res.status(503).json({ error: "GOOGLE_MAPS_API_KEY não configurada" }); return; }
+  if (input.length < 3) { res.json({ predictions: [] }); return; }
+
+  const body: Record<string, unknown> = {
+    input,
+    includedRegionCodes: ["br"],
+    languageCode: "pt-BR",
+    locationBias: {
+      circle: {
+        center: { latitude: -22.3574, longitude: -47.3841 },
+        radius: 15000,
+      },
+    },
+  };
+  if (sessionToken) body.sessionToken = sessionToken;
+
+  try {
+    const response = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": googleKey,
+        "X-Goog-FieldMask": "suggestions.placePrediction.placeId,suggestions.placePrediction.text.text,suggestions.placePrediction.structuredFormat.mainText.text,suggestions.placePrediction.structuredFormat.secondaryText.text",
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      res.status(502).json({ error: "Google Places Autocomplete falhou", details: payload?.error?.message ?? "Google API error" });
+      return;
+    }
+
+    const predictions = Array.isArray(payload?.suggestions)
+      ? payload.suggestions
+          .map((item: {
+            placePrediction?: {
+              placeId?: string;
+              text?: { text?: string };
+              structuredFormat?: {
+                mainText?: { text?: string };
+                secondaryText?: { text?: string };
+              };
+            };
+          }) => {
+            const prediction = item.placePrediction;
+            return prediction?.placeId && prediction.text?.text
+              ? {
+                  placeId: prediction.placeId,
+                  displayName: prediction.text.text,
+                  mainText: prediction.structuredFormat?.mainText?.text ?? prediction.text.text,
+                  secondaryText: prediction.structuredFormat?.secondaryText?.text ?? "",
+                }
+              : null;
+          })
+          .filter(Boolean)
+          .slice(0, 5)
+      : [];
+
+    res.json({ predictions });
+  } catch {
+    res.status(502).json({ error: "Não foi possível consultar o Google Places Autocomplete" });
+  }
+});
+
+router.get("/game/google/place-details", async (req: Request, res: Response): Promise<void> => {
+  const googleKey = key();
+  const placeId = String(req.query.placeId ?? "").trim();
+  const sessionToken = String(req.query.sessionToken ?? "").trim();
+  if (!googleKey) { res.status(503).json({ error: "GOOGLE_MAPS_API_KEY não configurada" }); return; }
+  if (!placeId) { res.status(400).json({ error: "placeId é obrigatório" }); return; }
+
+  try {
+    const params = new URLSearchParams();
+    if (sessionToken) params.set("sessionToken", sessionToken);
+    const query = params.toString();
+    const response = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}${query ? `?${query}` : ""}`, {
+      headers: {
+        "X-Goog-Api-Key": googleKey,
+        "X-Goog-FieldMask": "id,formattedAddress,location",
+      },
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      res.status(502).json({ error: "Google Place Details falhou", details: payload?.error?.message ?? "Google API error" });
+      return;
+    }
+
+    const formattedAddress = String(payload?.formattedAddress ?? "").trim();
+    const lat = Number(payload?.location?.latitude);
+    const lon = Number(payload?.location?.longitude);
+    if (!formattedAddress || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+      res.status(502).json({ error: "Google não retornou uma localização válida para este lugar" });
+      return;
+    }
+    if (!isArarasAddress(formattedAddress)) {
+      res.status(403).json({ error: "Public search is available only for Araras, SP addresses" });
+      return;
+    }
+
+    res.json({
+      placeId: String(payload?.id ?? placeId),
+      displayName: formattedAddress,
+      lat,
+      lon,
+    });
+  } catch {
+    res.status(502).json({ error: "Não foi possível consultar os detalhes do lugar no Google" });
+  }
+});
+
 router.get("/game/google/geocode", async (req: Request, res): Promise<void> => {
   const googleKey = key();
   const address = String(req.query.address ?? "").trim();
