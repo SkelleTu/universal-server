@@ -53,11 +53,11 @@ function serverFor(claims:Claims){
     inputSchema:{},
     outputSchema:{id:z.string().min(1),name:z.string().optional(),nickname:z.string().optional()},
     annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false,idempotentHint:true},
-    _meta:{"openai/profile":true,securitySchemes:READ_SECURITY},
+    securitySchemes:READ_SECURITY,_meta:{"openai/profile":true,securitySchemes:READ_SECURITY},
   },async()=>{const p={id:claims.sub,...(claims.username?{name:claims.username,nickname:claims.username}:{})};return{structuredContent:p,content:[{type:"text",text:JSON.stringify(p)}]}});
   server.registerTool("get_universal_health",{
     title:"Get Universal Server health",description:"Inspect Universal Server health without changing state.",inputSchema:{},outputSchema:resultSchema,
-    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false,idempotentHint:true},_meta:{securitySchemes:READ_SECURITY}
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false,idempotentHint:true},securitySchemes:READ_SECURITY,_meta:{securitySchemes:READ_SECURITY}
   },async()=>{const traceId=crypto.randomUUID(),requestId=crypto.randomUUID();const r=await local("/api/healthz",{headers:{"x-trace-id":traceId,"x-request-id":requestId}});const o={ok:r.ok,status:r.status,result:r.result,traceId,requestId};return{structuredContent:o,content:[{type:"text",text:JSON.stringify(o)}]}});
   server.registerTool("get_capabilities",{
     title:"Get Aura system capabilities",description:"Inspect capabilities exposed through Universal Server and the Supreme Operator.",inputSchema:{},outputSchema:resultSchema,
@@ -76,7 +76,7 @@ function serverFor(claims:Claims){
     description:"Execute an explicit user-requested Aura operation through the existing Supreme Operator. This may change system state.",
     inputSchema:{domain:z.string().min(1),action:z.string().min(1),args:z.record(z.unknown()).optional().default({})},
     outputSchema:z.object({ok:z.boolean(),executed:z.boolean().optional(),status:z.number().int().optional(),result:z.unknown().optional(),traceId:z.string(),requestId:z.string()}),
-    annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},_meta:{securitySchemes:EXECUTE_SECURITY}
+    annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},securitySchemes:EXECUTE_SECURITY,_meta:{securitySchemes:EXECUTE_SECURITY}
   },async({domain,action,args})=>{
     if(!verify(claims.__token??"","aura.execute"))return authError("aura.execute");
     const traceId=crypto.randomUUID(),requestId=crypto.randomUUID();
