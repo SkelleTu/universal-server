@@ -229,7 +229,7 @@ async function toolCall(name: string, args: any, claims: Claims) {
         "x-trace-id": traceId,
         "x-request-id": requestId,
         "x-aurora-operator-mode": "supreme",
-        "authorization": `Bearer ${MCP_SECRET}`,
+        "authorization": `Bearer ${process.env.AURA_AGENT_TOKEN || MCP_SECRET}`,
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(50000),
