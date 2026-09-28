@@ -278,7 +278,8 @@ router.post("/mcp", async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  const claims = requireScope(req, res, method === "tools/call" ? "aura.execute" : "aura.read");
+  const initialScope = method === "tools/call" ? "aura.read" : "aura.read";
+  const claims = requireScope(req, res, initialScope);
   if (!claims) return;
 
   if (method === "tools/list") {
