@@ -8,6 +8,7 @@ import googleRouter from "./google";
 import playerStateRouter from "./player-state";
 import multiplayerRouter from "./multiplayer";
 import authRouter from "./auth";
+import agentRouter from "./agent";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use(googleRouter);
 router.use(playerStateRouter);
 router.use(multiplayerRouter);
 router.use(authRouter);
+router.use(agentRouter);
 
 export default router;
