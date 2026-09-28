@@ -13,7 +13,7 @@ function requestedMode(req: Request): string {
 function authToken(req: Request): boolean {
   const expected = process.env.AURA_AGENT_TOKEN?.trim();
   if (!expected) return true;
-  const supplied = String(req.headers.authorization ?? "").replace(/^Bearer\\s+/i, "").trim();
+  const supplied = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
   return supplied === expected;
 }
 
@@ -91,13 +91,13 @@ router.post("/supreme/tool", async (req: Request, res: Response): Promise<void> 
 
   const target = String(req.body?.target ?? "agent").trim().toLowerCase();
   if (target === "integratesystem") {
-    const base = process.env.INTEGRATESYSTEM_URL?.replace(/\\/$/, "");
+    const base = process.env.INTEGRATESYSTEM_URL?.replace(/\/$/, "");
     if (!base) {
       res.status(503).json({ ok: false, error: "IntegrateSystem URL is not configured", traceId, requestId, operatorMode: allowed });
       return;
     }
     const path = String(req.body?.path ?? "/api/health").trim() || "/api/health";
-    const response = await fetch(`${base}/${path.replace(/^\\//, "")}`, {
+    const response = await fetch(`${base}/${path.replace(/^\//, "")}`, {
       method: String(req.body?.method ?? "GET").toUpperCase(),
       headers: {
         ...(process.env.INTEGRATESYSTEM_TOKEN ? { authorization: `Bearer ${process.env.INTEGRATESYSTEM_TOKEN}` } : {}),
