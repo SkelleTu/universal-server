@@ -61,15 +61,15 @@ function serverFor(claims:Claims){
   },async()=>{const traceId=crypto.randomUUID(),requestId=crypto.randomUUID();const r=await local("/api/healthz",{headers:{"x-trace-id":traceId,"x-request-id":requestId}});const o={ok:r.ok,status:r.status,result:r.result,traceId,requestId};return{structuredContent:o,content:[{type:"text",text:JSON.stringify(o)}]}});
   server.registerTool("get_capabilities",{
     title:"Get Aura system capabilities",description:"Inspect capabilities exposed through Universal Server and the Supreme Operator.",inputSchema:{},outputSchema:resultSchema,
-    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false,idempotentHint:true},_meta:{securitySchemes:READ_SECURITY}
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false,idempotentHint:true},securitySchemes:READ_SECURITY,_meta:{securitySchemes:READ_SECURITY}
   },async()=>{const traceId=crypto.randomUUID(),requestId=crypto.randomUUID();const r=await local("/api/agent/capabilities",{headers:{"x-trace-id":traceId,"x-request-id":requestId,"x-aurora-operator-mode":"supreme"}});const o={ok:r.ok,status:r.status,result:r.result,traceId,requestId};return{structuredContent:o,content:[{type:"text",text:JSON.stringify(o)}]}});
   server.registerTool("get_diagnostics",{
     title:"Get Aurora diagnostics",description:"Inspect Aurora correlation and diagnostic state without changing state.",inputSchema:{traceId:z.string().min(1).optional()},outputSchema:resultSchema,
-    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false,idempotentHint:true},_meta:{securitySchemes:READ_SECURITY}
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false,idempotentHint:true},securitySchemes:READ_SECURITY,_meta:{securitySchemes:READ_SECURITY}
   },async({traceId})=>{const requestTraceId=crypto.randomUUID(),requestId=crypto.randomUUID(),path=traceId?`/api/diagnostics/aurora/${encodeURIComponent(traceId)}`:"/api/diagnostics/aurora";const r=await local(path,{headers:{"x-trace-id":requestTraceId,"x-request-id":requestId,"x-aurora-operator-mode":"supreme"}});const o={ok:r.ok,status:r.status,result:r.result,traceId:requestTraceId,requestId};return{structuredContent:o,content:[{type:"text",text:JSON.stringify(o)}]}});
   server.registerTool("get_aurora_status",{
     title:"Get Aurora Agent status",description:"Check the deployed Aurora Agent health endpoint without changing state.",inputSchema:{},outputSchema:resultSchema,
-    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:true,idempotentHint:true},_meta:{securitySchemes:READ_SECURITY}
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:true,idempotentHint:true},securitySchemes:READ_SECURITY,_meta:{securitySchemes:READ_SECURITY}
   },async()=>{const traceId=crypto.randomUUID(),requestId=crypto.randomUUID();const r=await fetch(`${AURORA_AGENT_URL}/health`,{headers:{Accept:"application/json","x-trace-id":traceId,"x-request-id":requestId},signal:AbortSignal.timeout(10000)});const text=await r.text();let result:any=null;try{result=text?JSON.parse(text):null}catch{result={raw:text}}const o={ok:r.ok,status:r.status,result,traceId,requestId};return{structuredContent:o,content:[{type:"text",text:JSON.stringify(o)}]}});
   server.registerTool("execute_supreme_action",{
     title:"Execute a Supreme Operator action",
