@@ -21,7 +21,121 @@ const ACTIONS = {
   settings: ["get", "set"],
   game: ["cache_get", "cache_set", "cache_delete"],
   weather: ["current"],
+  avatar: ["state", "look", "walk", "sit", "gesture", "speak", "setExpression", "setOutfit"],
+  scene: ["state", "set", "transition"],
+  animation: ["state", "play", "stop"],
+  voice: ["state", "speak", "stop"],
+  interface: ["state", "notify", "setPanel", "setStatus"],
 } as const;
+
+const RUNTIME_NAMESPACE = "aurora-runtime";
+const RUNTIME_DOMAINS = ["avatar", "scene", "animation", "voice", "interface"] as const;
+
+type RuntimeDomain = (typeof RUNTIME_DOMAINS)[number];
+
+function runtimeKey(domain: RuntimeDomain): string {
+  return `runtime:${domain}`;
+}
+
+async function readRuntime(projectId: number, domain: RuntimeDomain) {
+  return pgGetGameCache(projectId, RUNTIME_NAMESPACE, runtimeKey(domain));
+}
+
+async function writeRuntime(projectId: number, domain: RuntimeDomain, state: Record<string, unknown>) {
+  const row = await pgUpsertGameCache(projectId, RUNTIME_NAMESPACE, runtimeKey(domain), state, null);
+  sqMirrorUpsertGameCache(row.id, projectId, RUNTIME_NAMESPACE, runtimeKey(domain), state, null);
+  return row;
+}
+
+function stringArg(args: Record<string, unknown>, key: string, max = 200): string {
+  return String(args[key] ?? "").trim().slice(0, max);
+}
+
+function commandId(): string {
+  return crypto.randomUUID();
+}
+
+async function executeRuntimeAction(
+  projectId: number,
+  domain: RuntimeDomain,
+  action: string,
+  args: Record<string, unknown>,
+) {
+  const existing = await readRuntime(projectId, domain);
+  const previous = validObject(existing?.data) ? existing.data : {};
+  const now = new Date().toISOString();
+
+  if (action === "state") {
+    return { state: previous, updatedAt: existing?.updated_at ?? null };
+  }
+
+  const id = commandId();
+  let patch: Record<string, unknown>;
+
+  if (domain === "avatar") {
+    if (action === "setExpression") {
+      const expression = stringArg(args, "expression", 40);
+      if (!expression) throw new Error("avatar expression is required");
+      patch = { expression };
+    } else if (action === "setOutfit") {
+      const outfit = stringArg(args, "outfit", 80);
+      if (!outfit) throw new Error("avatar outfit is required");
+      patch = { outfit };
+    } else {
+      patch = { pose: action, target: stringArg(args, "target", 160) || null };
+    }
+  } else if (domain === "scene") {
+    if (action === "set") {
+      const preset = stringArg(args, "preset", 60);
+      if (!preset) throw new Error("scene preset is required");
+      patch = { preset };
+    } else {
+      const transition = stringArg(args, "transition", 40) || "fade";
+      patch = { transition, preset: stringArg(args, "preset", 60) || previous.preset || "default" };
+    }
+  } else if (domain === "animation") {
+    if (action === "play") {
+      const name = stringArg(args, "name", 100);
+      if (!name) throw new Error("animation name is required");
+      const speed = Number(args.speed ?? 1);
+      if (!Number.isFinite(speed) || speed <= 0 || speed > 8) throw new Error("animation speed must be between 0 and 8");
+      patch = { playing: true, name, loop: args.loop !== false, speed };
+    } else {
+      patch = { playing: false, name: previous.name ?? null };
+    }
+  } else if (domain === "voice") {
+    if (action === "speak") {
+      const text = stringArg(args, "text", 4000);
+      if (!text) throw new Error("voice text is required");
+      patch = { speaking: true, text, language: stringArg(args, "language", 20) || "pt-BR", model: stringArg(args, "model", 160) || null };
+    } else {
+      patch = { speaking: false };
+    }
+  } else {
+    if (action === "notify") {
+      const message = stringArg(args, "message", 1000);
+      if (!message) throw new Error("interface notification message is required");
+      patch = { notification: message };
+    } else if (action === "setPanel") {
+      const panel = stringArg(args, "panel", 40);
+      if (!panel) throw new Error("interface panel is required");
+      patch = { panel };
+    } else {
+      const text = stringArg(args, "text", 1000);
+      if (!text) throw new Error("interface status text is required");
+      patch = { status: text };
+    }
+  }
+
+  const state = {
+    ...previous,
+    ...patch,
+    lastCommand: { id, action, args, at: now },
+    updatedAt: now,
+  };
+  const row = await writeRuntime(projectId, domain, state);
+  return { state: row.data, updatedAt: row.updated_at, commandId: id };
+}
 
 function authorized(req: Request): boolean {
   const expected = process.env.AURA_AGENT_TOKEN?.trim();
@@ -222,6 +336,16 @@ router.post("/agent/action", async (req: Request, res: Response): Promise<void> 
     const row = await pgUpsertGameCache(project.id, namespace, cacheKey, args.data, expiresAt);
     sqMirrorUpsertGameCache(row.id, project.id, namespace, cacheKey, args.data, expiresAt);
     res.json({ ok: true, executed: true, domain, action, result: { cache: row } });
+    return;
+  }
+
+  if (RUNTIME_DOMAINS.includes(domain as RuntimeDomain)) {
+    try {
+      const result = await executeRuntimeAction(project.id, domain as RuntimeDomain, action, args);
+      res.json({ ok: true, executed: true, domain, action, result });
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error instanceof Error ? error.message : "Invalid runtime action", domain, action });
+    }
     return;
   }
 
