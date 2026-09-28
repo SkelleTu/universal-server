@@ -9,6 +9,7 @@ import playerStateRouter from "./player-state";
 import multiplayerRouter from "./multiplayer";
 import authRouter from "./auth";
 import integrateSystemRouter from "./integratesystem";
+import supremeRouter from "./supreme";
 import agentRouter from "./agent";
 
 const router: IRouter = Router();
@@ -22,7 +23,9 @@ router.use(googleRouter);
 router.use(playerStateRouter);
 router.use(multiplayerRouter);
 router.use(authRouter);
-// Delegated IntegrateSystem actions must be registered before the generic agent route.
+// The existing Aurora bridge enters through the single Supreme operator gate.
+router.use(supremeRouter);
+// Delegated IntegrateSystem actions remain ahead of the generic agent handler.
 router.use(integrateSystemRouter);
 router.use(agentRouter);
 

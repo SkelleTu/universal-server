@@ -6,7 +6,7 @@ const DEFAULT_READY_TIMEOUT_MS = 40000;
 const DEFAULT_RETRY_DELAY_MS = 1200;
 const ACTIONS = ["health", "status", "diagnostics"] as const;
 
-type Correlation = { traceId: string; requestId: string };
+type Correlation = { traceId: string; requestId: string; operatorMode: string };
 
 function id(value: unknown): string {
   const text = String(value ?? "").trim();
@@ -17,6 +17,7 @@ function correlation(req: Request): Correlation {
   return {
     traceId: id(req.headers["x-trace-id"] ?? req.body?.traceId),
     requestId: id(req.headers["x-request-id"] ?? req.body?.requestId),
+    operatorMode: String(req.headers["x-aurora-operator-mode"] ?? req.body?.operatorMode ?? process.env.AURORA_OPERATOR_MODE ?? "supreme").trim().toLowerCase() || "supreme",
   };
 }
 
@@ -63,6 +64,7 @@ async function getJson(path: string, correlationIds: Correlation) {
         Accept: "application/json",
         "x-trace-id": correlationIds.traceId,
         "x-request-id": correlationIds.requestId,
+        "x-aurora-operator-mode": correlationIds.operatorMode,
       },
       signal: controller.signal,
     });
@@ -76,6 +78,7 @@ async function getJson(path: string, correlationIds: Correlation) {
       latencyMs: Date.now() - startedAt,
       traceId: response.headers.get("x-trace-id") ?? correlationIds.traceId,
       requestId: response.headers.get("x-request-id") ?? correlationIds.requestId,
+      operatorMode: response.headers.get("x-aurora-operator-mode") ?? correlationIds.operatorMode,
       result,
     };
   } catch (error) {
@@ -87,6 +90,7 @@ async function getJson(path: string, correlationIds: Correlation) {
       timedOut: error instanceof Error && error.name === "AbortError",
       traceId: correlationIds.traceId,
       requestId: correlationIds.requestId,
+      operatorMode: correlationIds.operatorMode,
       reason: error instanceof Error ? error.message : "IntegrateSystem request failed",
     };
   } finally {
@@ -120,6 +124,7 @@ router.get("/agent/capabilities", (req, res) => {
   res.json({
     ok: true,
     service: "universal-server",
+    operatorMode: String(process.env.AURORA_OPERATOR_MODE ?? "supreme").trim().toLowerCase() || "supreme",
     delegatedServices: {
       integratesystem: {
         configured: Boolean(baseUrl()),
@@ -146,6 +151,7 @@ router.post("/agent/action", async (req: Request, res: Response): Promise<void> 
   const correlationIds = correlation(req);
   res.setHeader("x-trace-id", correlationIds.traceId);
   res.setHeader("x-request-id", correlationIds.requestId);
+  res.setHeader("x-aurora-operator-mode", correlationIds.operatorMode);
 
   if (domain !== "integratesystem") return void res.status(404).json({ ok: false, error: "Unsupported delegated domain", domain, action, ...correlationIds });
   if (!ACTIONS.includes(action as (typeof ACTIONS)[number])) {
