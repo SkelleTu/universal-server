@@ -36,15 +36,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function getJson(path: string, signal?: AbortSignal) {
+async function getJson(path: string) {
   const base = baseUrl();
   if (!base) return { ok: false, configured: false, reason: "INTEGRATESYSTEM_URL is not configured" };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs());
   const startedAt = Date.now();
-  const onAbort = () => controller.abort();
-  signal?.addEventListener("abort", onAbort, { once: true });
   try {
     const response = await fetch(`${base}${path}`, {
       headers: { Accept: "application/json" },
@@ -71,21 +69,17 @@ async function getJson(path: string, signal?: AbortSignal) {
     };
   } finally {
     clearTimeout(timer);
-    signal?.removeEventListener("abort", onAbort);
   }
 }
 
-async function waitForReady(signal?: AbortSignal) {
+async function waitForReady() {
   const startedAt = Date.now();
   let attempts = 0;
   let last: Awaited<ReturnType<typeof getJson>> = { ok: false, configured: Boolean(baseUrl()), reason: "not_checked" };
 
   while (Date.now() - startedAt < readyTimeoutMs()) {
-    if (signal?.aborted) {
-      return { ok: false, state: "cancelled", attempts, waitedMs: Date.now() - startedAt, last };
-    }
     attempts += 1;
-    last = await getJson("/api/runtime/status", signal);
+    last = await getJson("/api/runtime/status");
     if (last.ok) {
       return { ok: true, state: "ready", attempts, waitedMs: Date.now() - startedAt, last };
     }
@@ -140,16 +134,15 @@ router.post("/agent/action", async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const readiness = await waitForReady(req.signal);
+    const readiness = await waitForReady();
     if (!readiness.ok) {
-      const cancelled = readiness.state === "cancelled";
-      res.status(cancelled ? 499 : 503).json({
+      res.status(503).json({
         ok: false,
         executed: false,
         domain,
         action,
         state: readiness.state,
-        error: cancelled ? "Request cancelled" : "IntegrateSystem did not become ready in time",
+        error: "IntegrateSystem did not become ready in time",
         readiness,
       });
       return;
@@ -157,8 +150,8 @@ router.post("/agent/action", async (req: Request, res: Response): Promise<void> 
 
     if (action === "health") {
       const [database, runtime] = await Promise.all([
-        getJson("/api/db/status", req.signal),
-        getJson("/api/runtime/status", req.signal),
+        getJson("/api/db/status"),
+        getJson("/api/runtime/status"),
       ]);
       const ok = database.ok && runtime.ok;
       res.status(ok ? 200 : 503).json({ ok, executed: true, domain, action, state: "ready", result: { database, runtime }, readiness });
@@ -167,8 +160,8 @@ router.post("/agent/action", async (req: Request, res: Response): Promise<void> 
 
     if (action === "status") {
       const [database, runtime] = await Promise.all([
-        getJson("/api/db/status", req.signal),
-        getJson("/api/runtime/status", req.signal),
+        getJson("/api/db/status"),
+        getJson("/api/runtime/status"),
       ]);
       res.status(database.ok || runtime.ok ? 200 : 503).json({
         ok: database.ok && runtime.ok,
@@ -182,7 +175,7 @@ router.post("/agent/action", async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const runtime = await getJson("/api/runtime/status", req.signal);
+    const runtime = await getJson("/api/runtime/status");
     res.status(runtime.ok ? 200 : 503).json({ ok: runtime.ok, executed: runtime.ok, domain, action, state: runtime.ok ? "ready" : "degraded", result: runtime.result, readiness });
   } catch (error) {
     res.status(503).json({ ok: false, executed: false, domain, action, state: "unavailable", error: error instanceof Error ? error.message : "IntegrateSystem unavailable" });
