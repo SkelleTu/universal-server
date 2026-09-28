@@ -11,6 +11,7 @@ import authRouter from "./auth";
 import integrateSystemRouter from "./integratesystem";
 import supremeRouter from "./supreme";
 import agentRouter from "./agent";
+import mcpRouter from "./mcp";
 
 const router: IRouter = Router();
 
@@ -27,6 +28,7 @@ router.use(authRouter);
 router.use(supremeRouter);
 // Delegated IntegrateSystem actions remain ahead of the generic agent handler.
 router.use(integrateSystemRouter);
+router.use(mcpRouter);
 router.use(agentRouter);
 
 export default router;
