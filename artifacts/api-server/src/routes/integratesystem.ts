@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 
 const router: IRouter = Router();
 const DEFAULT_TIMEOUT_MS = 8000;
+const ACTIONS = ["health", "status", "diagnostics"] as const;
 
 function authorized(req: Request): boolean {
   const expected = process.env.AURA_AGENT_TOKEN?.trim();
@@ -41,6 +42,24 @@ async function getJson(path: string) {
   }
 }
 
+router.get("/agent/capabilities", (req, res) => {
+  if (!authorized(req)) {
+    res.status(401).json({ ok: false, error: "Aurora agent authorization required" });
+    return;
+  }
+  res.json({
+    ok: true,
+    service: "universal-server",
+    delegatedServices: {
+      integratesystem: {
+        configured: Boolean(baseUrl()),
+        actions: ACTIONS,
+      },
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
+
 router.post("/agent/action", async (req: Request, res: Response): Promise<void> => {
   if (!authorized(req)) {
     res.status(401).json({ ok: false, error: "Aurora agent authorization required" });
@@ -51,8 +70,8 @@ router.post("/agent/action", async (req: Request, res: Response): Promise<void> 
   const action = String(req.body?.action ?? "").trim().toLowerCase();
 
   if (domain !== "integratesystem") return void res.status(404).json({ ok: false, error: "Unsupported delegated domain", domain, action });
-  if (!["health", "status", "diagnostics"].includes(action)) {
-    res.status(400).json({ ok: false, error: "Unsupported IntegrateSystem action", available: ["health", "status", "diagnostics"] });
+  if (!ACTIONS.includes(action as (typeof ACTIONS)[number])) {
+    res.status(400).json({ ok: false, error: "Unsupported IntegrateSystem action", available: ACTIONS });
     return;
   }
 
