@@ -264,12 +264,22 @@ router.post("/mcp", async (req: Request, res: Response): Promise<void> => {
   const method = String(message?.method ?? "");
 
   if (method === "initialize" || method === "server/discover") {
-    res.json(jsonRpc(id, {
-      protocolVersion: method === "server/discover" ? "2026-07-28" : "2025-11-25",
-      serverInfo: { name: "aura-supreme-operator", version: "1.0.0" },
-      capabilities: { tools: { listChanged: false } },
-      instructions: "Use read tools to inspect the Aura ecosystem before execution. Use execute_supreme_action only for an explicit user-requested operation. The Supreme Operator is the central execution gate for Universal Server and delegated IntegrateSystem actions.",
-    }));
+    res.json(jsonRpc(id, method === "server/discover"
+      ? {
+          resultType: "complete",
+          supportedVersions: ["2026-07-28", "2025-11-25"],
+          capabilities: { tools: { listChanged: false } },
+          _meta: { "io.modelcontextprotocol/serverInfo": { name: "aura-supreme-operator", version: "1.0.0" } },
+          instructions: "Use read tools to inspect the Aura ecosystem before execution. Use execute_supreme_action only for an explicit user-requested operation. The Supreme Operator is the central execution gate for Universal Server and delegated IntegrateSystem actions.",
+          ttlMs: 3600000,
+          cacheScope: "public",
+        }
+      : {
+          protocolVersion: "2025-11-25",
+          serverInfo: { name: "aura-supreme-operator", version: "1.0.0" },
+          capabilities: { tools: { listChanged: false } },
+          instructions: "Use read tools to inspect the Aura ecosystem before execution. Use execute_supreme_action only for an explicit user-requested operation. The Supreme Operator is the central execution gate for Universal Server and delegated IntegrateSystem actions.",
+        }));
     return;
   }
 
