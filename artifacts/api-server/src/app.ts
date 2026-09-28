@@ -3,6 +3,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import path from "path";
 import router from "./routes";
+import mcpRouter from "./routes/mcp";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
@@ -54,6 +55,9 @@ app.use(
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT ?? "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT ?? "2mb" }));
 
+// MCP public protocol boundary. The API router remains under /api.
+app.use(mcpRouter);
+
 // API routes — sempre têm prioridade sobre qualquer rota estática
 app.use("/api", router);
 
@@ -69,3 +73,6 @@ if (process.env.NODE_ENV === "production") {
 }
 
 export default app;
+
+
+
