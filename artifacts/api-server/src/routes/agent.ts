@@ -21,7 +21,7 @@ const ACTIONS = {
   settings: ["get", "set"],
   game: ["cache_get", "cache_set", "cache_delete"],
   weather: ["current"],
-  avatar: ["state", "look", "walk", "sit", "gesture", "speak", "setExpression", "setOutfit"],
+  avatar: ["state", "look", "walk", "sit", "gesture", "speak", "setexpression", "setoutfit"],
   scene: ["state", "set", "transition"],
   animation: ["state", "play", "stop"],
   voice: ["state", "speak", "stop"],
@@ -73,11 +73,11 @@ async function executeRuntimeAction(
   let patch: Record<string, unknown>;
 
   if (domain === "avatar") {
-    if (action === "setExpression") {
+    if (action === "setexpression") {
       const expression = stringArg(args, "expression", 40);
       if (!expression) throw new Error("avatar expression is required");
       patch = { expression };
-    } else if (action === "setOutfit") {
+    } else if (action === "setoutfit") {
       const outfit = stringArg(args, "outfit", 80);
       if (!outfit) throw new Error("avatar outfit is required");
       patch = { outfit };
