@@ -44,7 +44,7 @@ async function local(path:string,options:RequestInit={}){
   const text=await response.text();let result:any=null;try{result=text?JSON.parse(text):null}catch{result={raw:text}}
   return {ok:response.ok,status:response.status,result};
 }
-function authError(scope:string){return {isError:true,content:[{type:"text" as const,text:`The current connection is not authorized for ${scope}.`}],_meta:{"mcp/www_authenticate":[`Bearer resource_metadata="${RESOURCE_URL}/.well-known/oauth-protected-resource", scope="${scope}"`]}};}
+function authError(scope:string){return {isError:true,content:[{type:"text" as const,text:`Authentication required for ${scope}.`}],_meta:{"mcp/www_authenticate":[`Bearer resource_metadata="${RESOURCE_URL}/.well-known/oauth-protected-resource", error="insufficient_scope", error_description="The ${scope} scope is required."`]}};}
 function serverFor(claims:Claims){
   const server=new McpServer({name:"aura-supreme-operator",version:"1.1.0"},{instructions:"Use read tools to inspect the Aura ecosystem before execution. Use execute_supreme_action only when the user explicitly requests an operation. Every action is routed through the existing Supreme Operator and retains trace/request correlation."});
   server.registerTool("get_profile",{
