@@ -23,10 +23,10 @@ router.use(googleRouter);
 router.use(playerStateRouter);
 router.use(multiplayerRouter);
 router.use(authRouter);
-// Delegated IntegrateSystem actions must be registered before the generic agent route.
-router.use(integrateSystemRouter);
-// The existing Aurora bridge enters through this single Supreme operator gate.
+// The existing Aurora bridge enters through the single Supreme operator gate.
 router.use(supremeRouter);
+// Delegated IntegrateSystem actions remain ahead of the generic agent handler.
+router.use(integrateSystemRouter);
 router.use(agentRouter);
 
 export default router;
