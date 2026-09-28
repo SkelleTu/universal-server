@@ -1,335 +1,100 @@
 import crypto from "node:crypto";
 import { Router, type Request, type Response } from "express";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { z } from "zod";
 
 const router = Router();
-
 const RESOURCE_URL = String(process.env.MCP_RESOURCE_URL ?? "https://universal-server1.onrender.com").replace(/\/$/, "");
 const OAUTH_ISSUER = String(process.env.MCP_OAUTH_ISSUER ?? "https://integrated-system-gzyu.onrender.com").replace(/\/$/, "");
 const MCP_SECRET = String(process.env.MCP_OAUTH_SECRET ?? "");
 const PORT = String(process.env.PORT ?? "10000");
+const AURORA_AGENT_URL = String(process.env.AURORA_AGENT_URL ?? "https://aurora-agent-o9x5.onrender.com").replace(/\/$/, "");
 
-type Claims = {
-  iss: string;
-  aud: string;
-  sub: string;
-  username?: string;
-  scope?: string;
-  iat: number;
-  exp: number;
-};
+type Claims = { iss:string; aud:string; sub:string; username?:string; scope?:string; iat:number; exp:number; __token?:string };
 
-type Tool = {
-  name: string;
-  title: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  outputSchema?: Record<string, unknown>;
-  annotations: Record<string, boolean>;
-  securitySchemes: Array<{ type: "oauth2"; scopes: string[] }>;
-  _meta: { securitySchemes: Array<{ type: "oauth2"; scopes: string[] }> };
-};
+const READ_SECURITY = [{ type: "oauth2", scopes: ["aura.read"] }];
+const EXECUTE_SECURITY = [{ type: "oauth2", scopes: ["aura.execute"] }];
+const resultSchema = z.object({
+  ok: z.boolean(),
+  status: z.number().int().optional(),
+  result: z.unknown().optional(),
+  traceId: z.string().optional(),
+  requestId: z.string().optional(),
+  reason: z.string().optional(),
+});
 
-function b64url(value: string | Buffer): string {
-  return Buffer.from(value).toString("base64url");
+function b64(value:string|Buffer){return Buffer.from(value).toString("base64url");}
+function equal(a:string,b:string){const x=Buffer.from(a),y=Buffer.from(b);return x.length===y.length&&crypto.timingSafeEqual(x,y);}
+function token(req:Request){return String(req.headers.authorization??"").replace(/^Bearer\s+/i,"").trim();}
+function verify(raw:string, scope?:string):Claims|null{
+  if(!MCP_SECRET)return null;
+  const p=raw.split("."); if(p.length!==3)return null;
+  let h:any,c:Claims; try{h=JSON.parse(Buffer.from(p[0],"base64url").toString());c=JSON.parse(Buffer.from(p[1],"base64url").toString())}catch{return null}
+  const sig=b64(crypto.createHmac("sha256",MCP_SECRET).update(`${p[0]}.${p[1]}`).digest());
+  const now=Math.floor(Date.now()/1000),scopes=String(c.scope??"").split(/\s+/).filter(Boolean);
+  if(h?.alg!=="HS256"||h?.typ!=="JWT"||!equal(sig,p[2])||c.iss!==OAUTH_ISSUER||c.aud!==RESOURCE_URL||!c.sub||c.exp<=now||c.iat>now+120)return null;
+  if(scope&&!scopes.includes(scope))return null;
+  return {...c,__token:raw};
 }
-
-function constantTime(a: string, b: string): boolean {
-  const aa = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
+function challenge(res:Response,scope="aura.read"){res.setHeader("WWW-Authenticate",`Bearer resource_metadata="${RESOURCE_URL}/.well-known/oauth-protected-resource", scope="${scope}"`);}
+function auth(req:Request,res:Response){const c=verify(token(req));if(!c){challenge(res);res.status(401).json({error:"unauthorized",error_description:"A valid OAuth access token is required."});return null}return c;}
+async function local(path:string,options:RequestInit={}){
+  const response=await fetch(`http://127.0.0.1:${PORT}${path}`,{...options,headers:{Accept:"application/json",...(options.headers??{})},signal:options.signal??AbortSignal.timeout(10000)});
+  const text=await response.text();let result:any=null;try{result=text?JSON.parse(text):null}catch{result={raw:text}}
+  return {ok:response.ok,status:response.status,result};
 }
-
-function verifyToken(token: string, requiredScope: string): Claims | null {
-  if (!MCP_SECRET) return null;
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  const [head, payload, signature] = parts;
-  let header: any;
-  let claims: Claims;
-  try {
-    header = JSON.parse(Buffer.from(head, "base64url").toString("utf8"));
-    claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-  } catch {
-    return null;
-  }
-  if (header?.alg !== "HS256" || header?.typ !== "JWT") return null;
-  const expected = b64url(crypto.createHmac("sha256", MCP_SECRET).update(`${head}.${payload}`).digest());
-  if (!constantTime(expected, signature)) return null;
-  const now = Math.floor(Date.now() / 1000);
-  const scopes = String(claims.scope ?? "").split(/\s+/).filter(Boolean);
-  if (claims.iss !== OAUTH_ISSUER || claims.aud !== RESOURCE_URL || !claims.sub || claims.exp <= now || claims.iat > now + 120) return null;
-  if (!scopes.includes(requiredScope)) return null;
-  return claims;
-}
-
-function auth(req: Request, scope: string): Claims | null {
-  const token = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
-  return token ? verifyToken(token, scope) : null;
-}
-
-function authChallenge(res: Response, scope: string) {
-  const metadata = `${RESOURCE_URL}/.well-known/oauth-protected-resource`;
-  res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${metadata}", scope="${scope}"`);
-}
-
-function jsonRpc(id: unknown, result: unknown) {
-  return { jsonrpc: "2.0", id, result };
-}
-
-function errorRpc(id: unknown, code: number, message: string) {
-  return { jsonrpc: "2.0", id, error: { code, message } };
-}
-
-const commonRead: Tool["securitySchemes"] = [{ type: "oauth2", scopes: ["aura.read"] }];
-const executeSecurity: Tool["securitySchemes"] = [{ type: "oauth2", scopes: ["aura.execute"] }];
-
-const tools: Tool[] = [
-  {
-    name: "get_profile",
-    title: "Get connected profile",
-    description: "Returns the authenticated Aura profile represented by the current OpenAI connection.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    outputSchema: {
-      type: "object",
-      properties: {
-        id: { type: "string", minLength: 1 },
-        name: { type: "string" },
-        nickname: { type: "string" },
-      },
-      required: ["id"],
-      additionalProperties: false,
-    },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-    securitySchemes: commonRead,
-    _meta: { securitySchemes: commonRead },
-  },
-  {
-    name: "get_universal_health",
-    title: "Get Universal Server health",
-    description: "Use this to inspect the health of the Universal Server without changing state.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
-    securitySchemes: commonRead,
-    _meta: { securitySchemes: commonRead },
-  },
-  {
-    name: "get_capabilities",
-    title: "Get system capabilities",
-    description: "Use this to inspect the capabilities exposed through the Universal Server and Supreme Operator.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
-    securitySchemes: commonRead,
-    _meta: { securitySchemes: commonRead },
-  },
-  {
-    name: "get_diagnostics",
-    title: "Get Aurora diagnostics",
-    description: "Use this to inspect Aurora correlation and diagnostic state without changing system state.",
-    inputSchema: {
-      type: "object",
-      properties: { traceId: { type: "string" } },
-      additionalProperties: false,
-    },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, idempotentHint: true },
-    securitySchemes: commonRead,
-    _meta: { securitySchemes: commonRead },
-  },
-  {
-    name: "get_aurora_status",
-    title: "Get Aurora Agent status",
-    description: "Use this to check the deployed Aurora Agent health endpoint without changing state.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true, idempotentHint: true },
-    securitySchemes: commonRead,
-    _meta: { securitySchemes: commonRead },
-  },
-  {
-    name: "execute_supreme_action",
-    title: "Execute a Supreme Operator action",
-    description: "Use this only when the user explicitly asks the Aura ecosystem to perform an operation. The action is routed through the existing Supreme Operator and preserves trace and request correlation.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        domain: { type: "string", minLength: 1 },
-        action: { type: "string", minLength: 1 },
-        args: { type: "object" },
-      },
-      required: ["domain", "action"],
-      additionalProperties: false,
-    },
-    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-    securitySchemes: executeSecurity,
-    _meta: { securitySchemes: executeSecurity },
-  },
-];
-
-async function localJson(path: string, options: RequestInit = {}) {
-  const response = await fetch(`http://127.0.0.1:${PORT}${path}`, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(options.headers ?? {}),
-    },
-    signal: options.signal ?? AbortSignal.timeout(10000),
+function authError(scope:string){return {isError:true,content:[{type:"text" as const,text:`The current connection is not authorized for ${scope}.`}],_meta:{"mcp/www_authenticate":[`Bearer resource_metadata="${RESOURCE_URL}/.well-known/oauth-protected-resource", scope="${scope}"`]}};}
+function serverFor(claims:Claims){
+  const server=new McpServer({name:"aura-supreme-operator",version:"1.1.0"},{instructions:"Use read tools to inspect the Aura ecosystem before execution. Use execute_supreme_action only when the user explicitly requests an operation. Every action is routed through the existing Supreme Operator and retains trace/request correlation."});
+  server.registerTool("get_profile",{
+    title:"Get connected profile",
+    description:"Return the profile represented by the authenticated Aura connection.",
+    inputSchema:{},
+    outputSchema:{id:z.string().min(1),name:z.string().optional(),nickname:z.string().optional()},
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false,idempotentHint:true},
+    _meta:{"openai/profile":true,securitySchemes:READ_SECURITY},
+  },async()=>{const p={id:claims.sub,...(claims.username?{name:claims.username,nickname:claims.username}:{})};return{structuredContent:p,content:[{type:"text",text:JSON.stringify(p)}]}});
+  server.registerTool("get_universal_health",{
+    title:"Get Universal Server health",description:"Inspect Universal Server health without changing state.",inputSchema:{},outputSchema:resultSchema,
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false,idempotentHint:true},_meta:{securitySchemes:READ_SECURITY}
+  },async()=>{const traceId=crypto.randomUUID(),requestId=crypto.randomUUID();const r=await local("/api/healthz",{headers:{"x-trace-id":traceId,"x-request-id":requestId}});const o={ok:r.ok,status:r.status,result:r.result,traceId,requestId};return{structuredContent:o,content:[{type:"text",text:JSON.stringify(o)}]}});
+  server.registerTool("get_capabilities",{
+    title:"Get Aura system capabilities",description:"Inspect capabilities exposed through Universal Server and the Supreme Operator.",inputSchema:{},outputSchema:resultSchema,
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false,idempotentHint:true},_meta:{securitySchemes:READ_SECURITY}
+  },async()=>{const traceId=crypto.randomUUID(),requestId=crypto.randomUUID();const r=await local("/api/agent/capabilities",{headers:{"x-trace-id":traceId,"x-request-id":requestId,"x-aurora-operator-mode":"supreme"}});const o={ok:r.ok,status:r.status,result:r.result,traceId,requestId};return{structuredContent:o,content:[{type:"text",text:JSON.stringify(o)}]}});
+  server.registerTool("get_diagnostics",{
+    title:"Get Aurora diagnostics",description:"Inspect Aurora correlation and diagnostic state without changing state.",inputSchema:{traceId:z.string().min(1).optional()},outputSchema:resultSchema,
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false,idempotentHint:true},_meta:{securitySchemes:READ_SECURITY}
+  },async({traceId})=>{const requestTraceId=crypto.randomUUID(),requestId=crypto.randomUUID(),path=traceId?`/api/diagnostics/aurora/${encodeURIComponent(traceId)}`:"/api/diagnostics/aurora";const r=await local(path,{headers:{"x-trace-id":requestTraceId,"x-request-id":requestId,"x-aurora-operator-mode":"supreme"}});const o={ok:r.ok,status:r.status,result:r.result,traceId:requestTraceId,requestId};return{structuredContent:o,content:[{type:"text",text:JSON.stringify(o)}]}});
+  server.registerTool("get_aurora_status",{
+    title:"Get Aurora Agent status",description:"Check the deployed Aurora Agent health endpoint without changing state.",inputSchema:{},outputSchema:resultSchema,
+    annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:true,idempotentHint:true},_meta:{securitySchemes:READ_SECURITY}
+  },async()=>{const traceId=crypto.randomUUID(),requestId=crypto.randomUUID();const r=await fetch(`${AURORA_AGENT_URL}/health`,{headers:{Accept:"application/json","x-trace-id":traceId,"x-request-id":requestId},signal:AbortSignal.timeout(10000)});const text=await r.text();let result:any=null;try{result=text?JSON.parse(text):null}catch{result={raw:text}}const o={ok:r.ok,status:r.status,result,traceId,requestId};return{structuredContent:o,content:[{type:"text",text:JSON.stringify(o)}]}});
+  server.registerTool("execute_supreme_action",{
+    title:"Execute a Supreme Operator action",
+    description:"Execute an explicit user-requested Aura operation through the existing Supreme Operator. This may change system state.",
+    inputSchema:{domain:z.string().min(1),action:z.string().min(1),args:z.record(z.unknown()).optional().default({})},
+    outputSchema:z.object({ok:z.boolean(),executed:z.boolean().optional(),status:z.number().int().optional(),result:z.unknown().optional(),traceId:z.string(),requestId:z.string()}),
+    annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},_meta:{securitySchemes:EXECUTE_SECURITY}
+  },async({domain,action,args})=>{
+    if(!verify(claims.__token??"","aura.execute"))return authError("aura.execute");
+    const traceId=crypto.randomUUID(),requestId=crypto.randomUUID();
+    const r=await local("/api/supreme/tool",{method:"POST",headers:{"content-type":"application/json","x-trace-id":traceId,"x-request-id":requestId,"x-aurora-operator-mode":"supreme",authorization:`Bearer ${claims.__token}`},body:JSON.stringify({target:"agent",domain:domain.trim().toLowerCase(),action:action.trim().toLowerCase(),args:args??{},operatorMode:"supreme",traceId,requestId}),signal:AbortSignal.timeout(50000)});
+    const o={ok:r.ok,executed:Boolean(r.result?.executed),status:r.status,result:r.result,traceId,requestId};return{structuredContent:o,content:[{type:"text",text:JSON.stringify(o)}]}
   });
-  const text = await response.text();
-  let result: unknown = null;
-  try { result = text ? JSON.parse(text) : null; } catch { result = { raw: text }; }
-  return { ok: response.ok, status: response.status, result };
+  return server;
 }
 
-async function toolCall(name: string, args: any, claims: Claims) {
-  const traceId = crypto.randomUUID();
-  const requestId = crypto.randomUUID();
-
-  if (name === "get_profile") {
-    return { structuredContent: { id: claims.sub, name: claims.username ?? "Aura user", nickname: claims.username ?? "Aura user" }, content: [{ type: "text", text: JSON.stringify({ id: claims.sub, name: claims.username ?? "Aura user" }) }] };
-  }
-
-  if (name === "get_universal_health") {
-    const result = await localJson("/api/healthz", { headers: { "x-trace-id": traceId, "x-request-id": requestId } });
-    return { structuredContent: { ok: result.ok, status: result.status, result: result.result, traceId, requestId }, content: [{ type: "text", text: JSON.stringify(result.result) }] };
-  }
-
-  if (name === "get_capabilities") {
-    const result = await localJson("/api/agent/capabilities", { headers: { "x-trace-id": traceId, "x-request-id": requestId, "x-aurora-operator-mode": "supreme" } });
-    return { structuredContent: { ok: result.ok, status: result.status, result: result.result, traceId, requestId }, content: [{ type: "text", text: JSON.stringify(result.result) }] };
-  }
-
-  if (name === "get_diagnostics") {
-    const trace = args?.traceId ? `?traceId=${encodeURIComponent(String(args.traceId))}` : "";
-    const result = await localJson(`/api/diagnostics/aurora${trace}`, { headers: { "x-trace-id": traceId, "x-request-id": requestId, "x-aurora-operator-mode": "supreme" } });
-    return { structuredContent: { ok: result.ok, status: result.status, result: result.result, traceId, requestId }, content: [{ type: "text", text: JSON.stringify(result.result) }] };
-  }
-
-  if (name === "get_aurora_status") {
-    const base = String(process.env.AURORA_AGENT_URL ?? "https://aurora-agent-o9x5.onrender.com").replace(/\/$/, "");
-    const response = await fetch(`${base}/health`, { headers: { Accept: "application/json", "x-trace-id": traceId, "x-request-id": requestId }, signal: AbortSignal.timeout(10000) });
-    const text = await response.text();
-    let result: unknown = null;
-    try { result = text ? JSON.parse(text) : null; } catch { result = { raw: text }; }
-    return { structuredContent: { ok: response.ok, status: response.status, result, traceId, requestId }, content: [{ type: "text", text: JSON.stringify(result) }] };
-  }
-
-  if (name === "execute_supreme_action") {
-    const body = {
-      target: "agent",
-      domain: String(args?.domain ?? "").trim().toLowerCase(),
-      action: String(args?.action ?? "").trim().toLowerCase(),
-      args: args?.args && typeof args.args === "object" ? args.args : {},
-      operatorMode: "supreme",
-      traceId,
-      requestId,
-    };
-    if (!body.domain || !body.action) throw new Error("domain and action are required");
-    const result = await localJson("/api/supreme/tool", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-trace-id": traceId,
-        "x-request-id": requestId,
-        "x-aurora-operator-mode": "supreme",
-        "authorization": `Bearer ${process.env.AURA_AGENT_TOKEN || MCP_SECRET}`,
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(50000),
-    });
-    return { structuredContent: { ok: result.ok, status: result.status, executed: Boolean((result.result as any)?.executed), result: result.result, traceId, requestId }, content: [{ type: "text", text: JSON.stringify(result.result) }] };
-  }
-
-  throw new Error(`Unknown tool: ${name}`);
-}
-
-function requireScope(req: Request, res: Response, scope: string): Claims | null {
-  const claims = auth(req, scope);
-  if (!claims) {
-    authChallenge(res, scope);
-    return null;
-  }
-  return claims;
-}
-
-router.get("/.well-known/oauth-protected-resource", (_req, res) => {
-  res.json({
-    resource: RESOURCE_URL,
-    authorization_servers: [OAUTH_ISSUER],
-    scopes_supported: ["aura.read", "aura.execute"],
-    resource_documentation: `${RESOURCE_URL}/mcp`,
-  });
+router.get("/.well-known/oauth-protected-resource",(_req,res)=>res.json({resource:RESOURCE_URL,authorization_servers:[OAUTH_ISSUER],scopes_supported:["aura.read","aura.execute"],resource_documentation:`${RESOURCE_URL}/mcp`}));
+router.all("/mcp",async(req:Request,res:Response)=>{
+  if(req.method==="OPTIONS"){res.status(204).end();return}
+  if(req.method!=="POST"){res.setHeader("Allow","POST, OPTIONS");res.status(405).json({error:"method_not_allowed"});return}
+  const claims=auth(req,res);if(!claims)return;
+  const server=serverFor(claims);
+  const transport=new StreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true});
+  try{await server.connect(transport);await transport.handleRequest(req,res,req.body)}
+  catch(error){if(!res.headersSent)res.status(500).json({error:"mcp_request_failed",message:error instanceof Error?error.message:"MCP request failed"})}
+  finally{try{await transport.close()}catch{}try{await server.close()}catch{}}
 });
-
-router.post("/mcp", async (req: Request, res: Response): Promise<void> => {
-  const message = req.body ?? {};
-  const id = message?.id ?? null;
-  const method = String(message?.method ?? "");
-
-  if (method === "initialize" || method === "server/discover") {
-    res.json(jsonRpc(id, method === "server/discover"
-      ? {
-          resultType: "complete",
-          supportedVersions: ["2026-07-28", "2025-11-25"],
-          capabilities: { tools: { listChanged: false } },
-          _meta: { "io.modelcontextprotocol/serverInfo": { name: "aura-supreme-operator", version: "1.0.0" } },
-          instructions: "Use read tools to inspect the Aura ecosystem before execution. Use execute_supreme_action only for an explicit user-requested operation. The Supreme Operator is the central execution gate for Universal Server and delegated IntegrateSystem actions.",
-          ttlMs: 3600000,
-          cacheScope: "public",
-        }
-      : {
-          protocolVersion: "2025-11-25",
-          serverInfo: { name: "aura-supreme-operator", version: "1.0.0" },
-          capabilities: { tools: { listChanged: false } },
-          instructions: "Use read tools to inspect the Aura ecosystem before execution. Use execute_supreme_action only for an explicit user-requested operation. The Supreme Operator is the central execution gate for Universal Server and delegated IntegrateSystem actions.",
-        }));
-    return;
-  }
-
-  if (method === "notifications/initialized" || method === "notifications/cancelled") {
-    res.status(202).end();
-    return;
-  }
-
-  const initialScope = method === "tools/call" ? "aura.read" : "aura.read";
-  const claims = requireScope(req, res, initialScope);
-  if (!claims) return;
-
-  if (method === "tools/list") {
-    res.json(jsonRpc(id, { tools }));
-    return;
-  }
-
-  if (method === "tools/call") {
-    const name = String(message?.params?.name ?? "");
-    const args = message?.params?.arguments ?? {};
-    const tool = tools.find((item) => item.name === name);
-    if (!tool) {
-      res.json(errorRpc(id, -32602, `Unknown tool: ${name}`));
-      return;
-    }
-    const required = tool.securitySchemes[0]?.scopes?.[0] ?? "aura.read";
-    const authorized = verifyToken(String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim(), required);
-    if (!authorized) {
-      authChallenge(res, required);
-      res.json(jsonRpc(id, {
-        isError: true,
-        content: [{ type: "text", text: "Authentication or scope required." }],
-        _meta: { "mcp/www_authenticate": [`Bearer resource_metadata="${RESOURCE_URL}/.well-known/oauth-protected-resource", scope="${required}"`] },
-      }));
-      return;
-    }
-    try {
-      const result = await toolCall(name, args, authorized);
-      res.json(jsonRpc(id, result));
-    } catch (error) {
-      res.json(jsonRpc(id, { isError: true, content: [{ type: "text", text: error instanceof Error ? error.message : "Tool execution failed." }] }));
-    }
-    return;
-  }
-
-  res.json(errorRpc(id, -32601, `Method not found: ${method}`));
-});
-
-router.get("/mcp", (_req, res) => {
-  res.status(405).json({ error: "MCP GET is not used by this stateless Streamable HTTP endpoint." });
-});
-
 export default router;
