@@ -154,6 +154,8 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
 
   useEffect(() => {
     let alive = true;
+    let fallbackTimer: number | undefined;
+
     const loadMcp = async () => {
       try {
         const response = await fetch('/api/dashboard/mcp', {
@@ -169,11 +171,58 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
         if (alive) setMcpLoading(false);
       }
     };
-    loadMcp();
-    const timer = window.setInterval(loadMcp, 1500);
+
+    const startRealtime = async () => {
+      try {
+        const response = await fetch('/api/dashboard/mcp/stream', {
+          headers: { 'x-dashboard-key': password },
+        });
+        if (!response.ok || !response.body) throw new Error('MCP stream unavailable');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (alive) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split('\n\n');
+          buffer = frames.pop() ?? '';
+
+          for (const frame of frames) {
+            const line = frame.split('\n').find((item) => item.startsWith('data: '));
+            if (!line) continue;
+            try {
+              const event = JSON.parse(line.slice(6));
+              if (!alive) continue;
+              setMcpStatus((previous: any) => {
+                if (!previous) return previous;
+                const events = [event, ...(previous.events ?? []).filter((item: any) => item.id !== event.id)].slice(0, 200);
+                return {
+                  ...previous,
+                  lastRequestAt: event.timestamp,
+                  lastStatus: event.status ?? previous.lastStatus,
+                  events,
+                };
+              });
+              setMcpLoading(false);
+            } catch {
+              // Ignore malformed SSE frames and keep the stream alive.
+            }
+          }
+        }
+      } catch {
+        if (!alive) return;
+        fallbackTimer = window.setInterval(loadMcp, 1500);
+      }
+    };
+
+    void loadMcp();
+    void startRealtime();
+
     return () => {
       alive = false;
-      window.clearInterval(timer);
+      if (fallbackTimer) window.clearInterval(fallbackTimer);
     };
   }, [password]);
   const originUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
@@ -462,9 +511,10 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
             </CardContent></Card>
           </div>
 
-          <Card className="glass-panel overflow-hidden">
-            <CardHeader className="border-b border-white/5">
-              <CardTitle className="text-base">Linha de conexão</CardTitle>
+          <div className="grid grid-cols-1 xl:grid-cols-[1.25fr_0.75fr] gap-4">
+            <Card className="glass-panel overflow-hidden">
+              <CardHeader className="border-b border-white/5">
+                <CardTitle className="text-base">Linha de conexão</CardTitle>
               <CardDescription>O servidor registra a etapa exata em que o fluxo parar.</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
@@ -485,7 +535,58 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
                 </div>
               )}
             </CardContent>
+            <CardContent className="p-0">
+              {(mcpStatus?.events ?? []).slice(0, 12).map((event: any) => (
+                <div key={event.id} className="grid grid-cols-[120px_1fr_auto] gap-3 items-center px-5 py-3 border-b border-white/5 text-xs">
+                  <span className="font-mono text-muted-foreground">{new Date(event.timestamp).toLocaleTimeString()}</span>
+                  <div>
+                    <div className="font-medium">{event.stage}</div>
+                    <div className="font-mono text-muted-foreground">{event.method} {event.path}</div>
+                    {event.detail && <div className="text-destructive/80 mt-1 truncate">{event.detail}</div>}
+                  </div>
+                  <span className={`font-mono ${event.status && event.status >= 400 ? 'text-destructive' : 'text-success'}`}>{event.status ?? '—'}</span>
+                </div>
+              ))}
+              {!mcpStatus?.events?.length && (
+                <div className="p-8 text-center text-sm text-muted-foreground">
+                  <AlertTriangle className="w-5 h-5 mx-auto mb-2 opacity-60" />
+                  Aguardando a primeira requisição do cliente.
+                </div>
+              )}
+            </CardContent>
           </Card>
+
+          <Card className="glass-panel overflow-hidden">
+            <CardHeader className="border-b border-white/5 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2"><Terminal className="w-4 h-4" /> Logs</CardTitle>
+                <CardDescription>Eventos MCP recebidos em tempo real.</CardDescription>
+              </div>
+              <span className="text-[10px] font-mono text-muted-foreground">LIVE</span>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="h-[340px] overflow-y-auto bg-black/30 font-mono text-[11px]">
+                {(mcpStatus?.events ?? []).slice(0, 60).map((event: any) => (
+                  <div key={event.id} className="px-4 py-2 border-b border-white/5 hover:bg-white/5">
+                    <div className="flex gap-2">
+                      <span className="text-muted-foreground">{new Date(event.timestamp).toLocaleTimeString()}</span>
+                      <span className={event.status && event.status >= 400 ? 'text-destructive' : 'text-success'}>{event.status ?? '—'}</span>
+                      <span className="text-primary">{event.stage}</span>
+                    </div>
+                    <div className="text-muted-foreground break-all">{event.method} {event.path}{event.source ? ` · ${event.source}` : ''}</div>
+                    {event.userAgent && <div className="text-muted-foreground/70 truncate">{event.userAgent}</div>}
+                    {event.detail && <div className="text-destructive break-words">{event.detail}</div>}
+                  </div>
+                ))}
+                {!mcpStatus?.events?.length && (
+                  <div className="h-full flex items-center justify-center p-6 text-center text-muted-foreground">
+                    Nenhum evento ainda. O log começa assim que o cliente tocar no MCP.
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+          </div>
         </section>
 
         {/* Documentation Panel */}
