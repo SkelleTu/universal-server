@@ -11,6 +11,7 @@ import authRouter from "./auth";
 import integrateSystemRouter from "./integratesystem";
 import supremeRouter from "./supreme";
 import agentRouter from "./agent";
+import auroraToolingRouter from "./aurora-tooling";
 import mcpRouter from "./mcp";
 
 const router: IRouter = Router();
@@ -28,6 +29,8 @@ router.use(authRouter);
 router.use(supremeRouter);
 // Delegated IntegrateSystem actions remain ahead of the generic agent handler.
 router.use(integrateSystemRouter);
+// Dynamic Aurora tooling is exposed separately from the legacy action catalog.
+router.use(auroraToolingRouter);
 router.use(mcpRouter);
 router.use(agentRouter);
 
