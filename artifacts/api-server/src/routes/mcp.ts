@@ -15,13 +15,14 @@ const AURORA_AGENT_URL = String(process.env.AURORA_AGENT_URL ?? "https://aurora-
 type McpMonitorEvent = {
   id: string; timestamp: string; stage: string; method: string; path: string;
   status?: number; durationMs?: number; source?: string; userAgent?: string; detail?: string;
+  kind?: "event" | "heartbeat";
 };
 const MCP_MONITOR_MAX = 200;
 const mcpMonitorEvents: McpMonitorEvent[] = [];
 const mcpMonitorListeners = new Set<ServerResponse>();
 
 function recordMcpEvent(event: Omit<McpMonitorEvent, "id" | "timestamp">) {
-  const item: McpMonitorEvent = { ...event, id: crypto.randomUUID(), timestamp: new Date().toISOString() };
+  const item: McpMonitorEvent = { ...event, kind: event.kind ?? "event", id: crypto.randomUUID(), timestamp: new Date().toISOString() };
   mcpMonitorEvents.push(item);
   if (mcpMonitorEvents.length > MCP_MONITOR_MAX) mcpMonitorEvents.splice(0, mcpMonitorEvents.length - MCP_MONITOR_MAX);
   const payload = "data: " + JSON.stringify(item) + "\\n\\n";
@@ -47,11 +48,32 @@ export function getMcpMonitorSnapshot() {
 
 export function streamMcpMonitor(response: ServerResponse) {
   mcpMonitorListeners.add(response);
+  try { response.write(": connected\n\n"); } catch {}
   for (const event of mcpMonitorEvents.slice(-50)) {
     try { response.write("data: " + JSON.stringify(event) + "\\n\\n"); } catch { break; }
   }
   response.on("close", () => mcpMonitorListeners.delete(response));
 }
+
+const mcpHeartbeat = setInterval(() => {
+  const last = mcpMonitorEvents[mcpMonitorEvents.length - 1] ?? null;
+  const payload = "data: " + JSON.stringify({
+    id: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+    stage: last ? "monitor-heartbeat" : "mcp-verificando",
+    method: "SYSTEM",
+    path: "/mcp",
+    status: last?.status ?? 200,
+    source: "Universal Server",
+    kind: "heartbeat",
+    detail: last
+      ? `Monitor ativo. Última etapa: ${last.stage}.`
+      : "Verificando MCP, OAuth, endpoint e aguardando o próximo cliente."
+  }) + "\n\n";
+  for (const response of mcpMonitorListeners) {
+    try { response.write(payload); } catch { mcpMonitorListeners.delete(response); }
+  }
+}, 1000);
 
 type Claims = { iss:string; aud:string; sub:string; username?:string; scope?:string; iat:number; exp:number; __token?:string };
 const READ_SECURITY = [{ type: "oauth2", scopes: ["aura.read"] }];
