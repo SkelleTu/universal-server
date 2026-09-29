@@ -15,8 +15,25 @@ const AURORA_AGENT_URL = String(process.env.AURORA_AGENT_URL ?? "https://aurora-
 type McpMonitorEvent = {
   id: string; timestamp: string; stage: string; method: string; path: string;
   status?: number; durationMs?: number; source?: string; userAgent?: string; detail?: string;
+  origin?: string; ip?: string; forwardedFor?: string; host?: string; contentType?: string;
+  accept?: string; authorizationPresent?: boolean; originHeader?: string; referer?: string;
   kind?: "event" | "heartbeat";
 };
+
+function requestContext(req: Request) {
+  const forwarded = String(req.headers["x-forwarded-for"] ?? "").trim();
+  const realIp = String(req.headers["x-real-ip"] ?? "").trim();
+  const ip = forwarded.split(",")[0]?.trim() || realIp || req.ip || "";
+  const userAgent = String(req.headers["user-agent"] ?? "");
+  const origin = String(req.headers.origin ?? "");
+  const referer = String(req.headers.referer ?? "");
+  const host = String(req.headers.host ?? "");
+  const accept = String(req.headers.accept ?? "");
+  const contentType = String(req.headers["content-type"] ?? "");
+  const authorizationPresent = Boolean(req.headers.authorization);
+  const source = userAgent.toLowerCase().includes("chatgpt") ? "ChatGPT" : "external-client";
+  return { source, userAgent, ip, forwardedFor: forwarded, host, contentType, accept, originHeader: origin, referer, authorizationPresent };
+}
 const MCP_MONITOR_MAX = 200;
 const mcpMonitorEvents: McpMonitorEvent[] = [];
 const mcpMonitorListeners = new Set<ServerResponse>();
@@ -103,10 +120,10 @@ router.get("/.well-known/oauth-protected-resource/mcp",(_req,res)=>{
 });
 router.all("/mcp",async(req:Request,res:Response)=>{
   const started=Date.now();
-  if(req.method==="OPTIONS"){res.status(204).end();recordMcpEvent({stage:"mcp-options",method:req.method,path:req.path,status:res.statusCode,durationMs:Date.now()-started,source:"client"});return}
-  if(req.method!=="POST"){res.setHeader("Allow","POST, OPTIONS");res.status(405).json({error:"method_not_allowed"});recordMcpEvent({stage:"mcp-method-rejected",method:req.method,path:req.path,status:res.statusCode,durationMs:Date.now()-started,source:"client"});return}
+  if(req.method==="OPTIONS"){res.status(204).end();recordMcpEvent({stage:"mcp-options",method:req.method,path:req.path,status:res.statusCode,durationMs:Date.now()-started,...requestContext(req)});return}
+  if(req.method!=="POST"){res.setHeader("Allow","POST, OPTIONS");res.status(405).json({error:"method_not_allowed"});recordMcpEvent({stage:"mcp-method-rejected",method:req.method,path:req.path,status:res.statusCode,durationMs:Date.now()-started,...requestContext(req),detail:"Método não permitido. O endpoint MCP aceita POST e OPTIONS."});return}
   const claims=auth(req,res);
-  if(!claims){recordMcpEvent({stage:"mcp-unauthorized",method:req.method,path:req.path,status:res.statusCode,durationMs:Date.now()-started,source:"ChatGPT",userAgent:String(req.headers["user-agent"]??"")});return}
-  const server=serverFor(claims);const transport=new StreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true});try{await server.connect(transport);await transport.handleRequest(req,res,req.body)}catch(error){if(!res.headersSent)res.status(500).json({error:"mcp_request_failed",message:error instanceof Error?error.message:"MCP request failed"});recordMcpEvent({stage:"mcp-error",method:req.method,path:req.path,status:res.statusCode,durationMs:Date.now()-started,source:"ChatGPT",detail:error instanceof Error?error.message:"MCP request failed"});}
-  finally{recordMcpEvent({stage:"mcp-request",method:req.method,path:req.path,status:res.statusCode,durationMs:Date.now()-started,source:"ChatGPT",userAgent:String(req.headers["user-agent"]??"")});try{await transport.close()}catch{}try{await server.close()}catch{}}
+  if(!claims){recordMcpEvent({stage:"mcp-unauthorized",method:req.method,path:req.path,status:res.statusCode,durationMs:Date.now()-started,...requestContext(req),detail:"Requisição sem token OAuth válido. O valor do token não é registrado."});return}
+  const server=serverFor(claims);const transport=new StreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true});try{await server.connect(transport);await transport.handleRequest(req,res,req.body)}catch(error){if(!res.headersSent)res.status(500).json({error:"mcp_request_failed",message:error instanceof Error?error.message:"MCP request failed"});recordMcpEvent({stage:"mcp-error",method:req.method,path:req.path,status:res.statusCode,durationMs:Date.now()-started,...requestContext(req),detail:error instanceof Error?error.message:"MCP request failed"});}
+  finally{recordMcpEvent({stage:"mcp-request",method:req.method,path:req.path,status:res.statusCode,durationMs:Date.now()-started,...requestContext(req)});try{await transport.close()}catch{}try{await server.close()}catch{}}
 });export default router;
