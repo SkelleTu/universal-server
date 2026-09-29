@@ -9,6 +9,7 @@ import {
   sqMirrorInsertProject,
   sqMirrorDeleteProject,
 } from "../../lib/sqlite";
+import { getMcpMonitorSnapshot } from "../mcp";
 
 const router: IRouter = Router();
 
@@ -39,6 +40,11 @@ function requireDashboard(req: Request, res: Response, next: NextFunction): void
   }
   next();
 }
+
+// ── MCP control room ─────────────────────────────────────────────────────────
+router.get("/dashboard/mcp", requireDashboard, (_req, res): void => {
+  res.json(getMcpMonitorSnapshot());
+});
 
 // ── Projects ──────────────────────────────────────────────────────────────────
 
