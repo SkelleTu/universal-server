@@ -9,7 +9,7 @@ import {
   sqMirrorInsertProject,
   sqMirrorDeleteProject,
 } from "../../lib/sqlite";
-import { getMcpMonitorSnapshot } from "../mcp";
+import { getMcpMonitorSnapshot, streamMcpMonitor } from "../mcp";
 
 const router: IRouter = Router();
 
@@ -44,6 +44,14 @@ function requireDashboard(req: Request, res: Response, next: NextFunction): void
 // ── MCP control room ─────────────────────────────────────────────────────────
 router.get("/dashboard/mcp", requireDashboard, (_req, res): void => {
   res.json(getMcpMonitorSnapshot());
+});
+
+router.get("/dashboard/mcp/stream", requireDashboard, (_req, res): void => {
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+  streamMcpMonitor(res);
 });
 
 // ── Projects ──────────────────────────────────────────────────────────────────
