@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Copy, Plus, Server, Activity, Database, Key, Trash2, Code, Terminal, ChevronRight, LogOut, Check } from 'lucide-react';
+import { Copy, Plus, Server, Activity, Database, Key, Trash2, Code, Terminal, ChevronRight, LogOut, Check, ShieldCheck, Wifi, AlertTriangle, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import { z } from 'zod';
 import { useForm } from 'react-hook-form';
@@ -149,6 +149,33 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
   const { data: health, isLoading: loadingHealth, isError: healthError } = useHealthCheck();
   const { toast } = useToast();
   const [isNewProjectOpen, setIsNewProjectOpen] = useState(false);
+  const [mcpStatus, setMcpStatus] = useState<any>(null);
+  const [mcpLoading, setMcpLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    const loadMcp = async () => {
+      try {
+        const response = await fetch('/api/dashboard/mcp', {
+          headers: { 'x-dashboard-key': password },
+        });
+        if (!response.ok) throw new Error('MCP status unavailable');
+        const data = await response.json();
+        if (alive) {
+          setMcpStatus(data);
+          setMcpLoading(false);
+        }
+      } catch {
+        if (alive) setMcpLoading(false);
+      }
+    };
+    loadMcp();
+    const timer = window.setInterval(loadMcp, 1500);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [password]);
   const originUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
 
   const form = useForm<ProjectFormValues>({
@@ -395,6 +422,71 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
             ))}
           </div>
         )}
+
+        {/* MCP Control Room */}
+        <section className="mb-12 border-t border-white/10 pt-12">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-primary" />
+                <h2 className="text-xl font-bold tracking-tight">MCP Control Room</h2>
+              </div>
+              <p className="text-sm text-muted-foreground mt-1">Observabilidade operacional do encaixe ChatGPT ↔ Universal Server ↔ OAuth.</p>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 bg-black/20">
+              <div className={`w-2 h-2 rounded-full ${mcpStatus?.online ? 'bg-success animate-pulse-slow' : 'bg-destructive'}`} />
+              <span className="text-xs font-medium">{mcpLoading ? 'Verificando' : mcpStatus?.online ? 'Ouvindo' : 'Indisponível'}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-5">
+            <Card className="glass-panel"><CardContent className="p-5">
+              <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2"><Wifi className="w-4 h-4" /> Endpoint</div>
+              <div className="font-mono text-sm">POST {mcpStatus?.endpoint ?? '/mcp'}</div>
+              <div className="text-xs text-muted-foreground mt-1">{mcpStatus?.transport ?? 'Streamable HTTP'}</div>
+            </CardContent></Card>
+            <Card className="glass-panel"><CardContent className="p-5">
+              <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2"><ShieldCheck className="w-4 h-4" /> OAuth</div>
+              <div className="font-mono text-sm">CIMD + PKCE S256</div>
+              <div className="text-xs text-muted-foreground mt-1 truncate">{mcpStatus?.oauth?.authorizationServer ?? 'Integrated System'}</div>
+            </CardContent></Card>
+            <Card className="glass-panel"><CardContent className="p-5">
+              <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2"><Clock className="w-4 h-4" /> Última requisição</div>
+              <div className="font-mono text-sm">{mcpStatus?.lastRequestAt ? new Date(mcpStatus.lastRequestAt).toLocaleTimeString() : 'Nenhuma'}</div>
+              <div className="text-xs text-muted-foreground mt-1">HTTP {mcpStatus?.lastStatus ?? '—'}</div>
+            </CardContent></Card>
+            <Card className="glass-panel"><CardContent className="p-5">
+              <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2"><Activity className="w-4 h-4" /> Eventos</div>
+              <div className="font-mono text-sm">{mcpStatus?.events?.length ?? 0}</div>
+              <div className="text-xs text-muted-foreground mt-1">janela dos últimos 200</div>
+            </CardContent></Card>
+          </div>
+
+          <Card className="glass-panel overflow-hidden">
+            <CardHeader className="border-b border-white/5">
+              <CardTitle className="text-base">Linha de conexão</CardTitle>
+              <CardDescription>O servidor registra a etapa exata em que o fluxo parar.</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              {(mcpStatus?.events ?? []).slice(0, 12).map((event: any) => (
+                <div key={event.id} className="grid grid-cols-[120px_1fr_auto] gap-3 items-center px-5 py-3 border-b border-white/5 text-xs">
+                  <span className="font-mono text-muted-foreground">{new Date(event.timestamp).toLocaleTimeString()}</span>
+                  <div>
+                    <div className="font-medium">{event.stage}</div>
+                    <div className="font-mono text-muted-foreground">{event.method} {event.path}</div>
+                  </div>
+                  <span className={`font-mono ${event.status && event.status >= 400 ? 'text-destructive' : 'text-success'}`}>{event.status ?? '—'}</span>
+                </div>
+              ))}
+              {!mcpStatus?.events?.length && (
+                <div className="p-8 text-center text-sm text-muted-foreground">
+                  <AlertTriangle className="w-5 h-5 mx-auto mb-2 opacity-60" />
+                  Aguardando a primeira requisição do cliente.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </section>
 
         {/* Documentation Panel */}
         <div className="mb-12 border-t border-white/10 pt-12">
