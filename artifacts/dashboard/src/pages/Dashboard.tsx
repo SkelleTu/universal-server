@@ -197,11 +197,16 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
               if (!alive) continue;
               setMcpStatus((previous: any) => {
                 if (!previous) return previous;
-                const events = [event, ...(previous.events ?? []).filter((item: any) => item.id !== event.id)].slice(0, 200);
+                const events = event.kind === 'heartbeat'
+                  ? (previous.events ?? [])
+                  : [event, ...(previous.events ?? []).filter((item: any) => item.id !== event.id)].slice(0, 200);
                 return {
                   ...previous,
-                  lastRequestAt: event.timestamp,
+                  lastRequestAt: event.kind === 'heartbeat' ? previous.lastRequestAt : event.timestamp,
                   lastStatus: event.status ?? previous.lastStatus,
+                  liveActivity: event.detail ?? event.stage,
+                  liveStage: event.stage,
+                  liveTimestamp: event.timestamp,
                   events,
                 };
               });
@@ -487,6 +492,28 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
               <span className="text-xs font-medium">{mcpLoading ? 'Verificando' : mcpStatus?.online ? 'Ouvindo' : 'Indisponível'}</span>
             </div>
           </div>
+
+          <Card className="glass-panel mb-4 border-primary/20">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className={`relative w-3 h-3 rounded-full ${mcpLoading ? 'bg-yellow-400' : mcpStatus?.online ? 'bg-success' : 'bg-destructive'}`}>
+                  <div className={`absolute inset-0 rounded-full animate-ping ${mcpLoading ? 'bg-yellow-400' : mcpStatus?.online ? 'bg-success' : 'bg-destructive'}`} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs uppercase tracking-wider text-muted-foreground">Linha viva agora</div>
+                  <div className="font-mono text-sm truncate">
+                    {mcpStatus?.liveActivity ?? 'Inicializando monitor MCP...'}
+                  </div>
+                </div>
+                <div className="text-[10px] font-mono text-muted-foreground">
+                  {mcpStatus?.liveTimestamp ? new Date(mcpStatus.liveTimestamp).toLocaleTimeString() : '—'}
+                </div>
+              </div>
+              <div className="mt-3 h-1 rounded-full bg-white/5 overflow-hidden">
+                <div className={`h-full w-1/2 rounded-full animate-pulse ${mcpLoading ? 'bg-yellow-400' : mcpStatus?.online ? 'bg-success' : 'bg-destructive'}`} />
+              </div>
+            </CardContent>
+          </Card>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-5">
             <Card className="glass-panel"><CardContent className="p-5">
