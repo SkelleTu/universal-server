@@ -58,9 +58,7 @@ function LoginScreen({ onLogin }: { onLogin: (password: string) => Promise<boole
       
       <div className="z-10 w-full max-w-md p-6">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 bg-card border border-white/10 rounded-2xl flex items-center justify-center mb-6 shadow-2xl">
-            <img src="/icons/universal.svg?v=2" alt="Universal Server" className="w-8 h-8 object-contain" />
-          </div>
+          <img src="/branding/universal-server-logo.png" alt="Universal Server" className="w-40 h-40 object-contain mb-6 drop-shadow-2xl" />
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Universal Server</h1>
           <p className="text-sm text-muted-foreground mt-2">Enter your dashboard key to continue</p>
         </div>
@@ -285,9 +283,7 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
       <header className="sticky top-0 z-50 border-b border-white/5 bg-background/80 backdrop-blur-xl">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="w-8 h-8 bg-primary/20 text-primary rounded-lg flex items-center justify-center">
-              <img src="/icons/universal.svg?v=2" alt="" aria-hidden="true" className="universal-brand-mark" />
-            </div>
+            <img src="/branding/universal-server-logo.png" alt="Universal Server" className="w-10 h-10 object-contain shrink-0" />
             <h1 className="font-bold tracking-tight">Universal Server</h1>
             
             <div className="hidden sm:flex items-center ml-4 px-3 py-1 bg-white/5 border border-white/10 rounded-full cursor-pointer hover:bg-white/10 transition-colors" onClick={copyOrigin}>
