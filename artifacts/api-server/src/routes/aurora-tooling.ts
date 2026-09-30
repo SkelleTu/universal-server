@@ -194,8 +194,8 @@ const TOOLING = {
 } as const;
 
 function authorized(req: Request): boolean {
-  const expected = process.env.AURA_AGENT_TOKEN?.trim();
-  if (!expected) return true;
+  const expected = (process.env.AURA_AGENT_TOKEN || process.env.AURORA_OPERATOR_TOKEN)?.trim();
+  if (!expected) return false;
   const supplied = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
   return supplied === expected;
 }
