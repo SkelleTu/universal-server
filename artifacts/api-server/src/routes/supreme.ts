@@ -11,8 +11,8 @@ function requestedMode(req: Request): string {
 }
 
 function authToken(req: Request): boolean {
-  const expected = process.env.AURA_AGENT_TOKEN?.trim();
-  if (!expected) return true;
+  const expected = (process.env.AURA_AGENT_TOKEN || process.env.AURORA_OPERATOR_TOKEN)?.trim();
+  if (!expected) return false;
   const supplied = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
   return supplied === expected;
 }
@@ -100,7 +100,7 @@ router.post("/supreme/tool", async (req: Request, res: Response): Promise<void> 
     const response = await fetch(`${base}/${path.replace(/^\//, "")}`, {
       method: String(req.body?.method ?? "GET").toUpperCase(),
       headers: {
-        ...(process.env.INTEGRATESYSTEM_TOKEN ? { authorization: `Bearer ${process.env.INTEGRATESYSTEM_TOKEN}` } : {}),
+        ...(String(process.env.AURORA_OPERATOR_TOKEN || process.env.INTEGRATESYSTEM_TOKEN || process.env.AURA_AGENT_TOKEN || "").trim() ? { authorization: `Bearer ${String(process.env.AURORA_OPERATOR_TOKEN || process.env.INTEGRATESYSTEM_TOKEN || process.env.AURA_AGENT_TOKEN).trim()}` } : {}),
         "x-trace-id": traceId,
         "x-request-id": requestId,
         "x-aurora-operator-mode": allowed,
