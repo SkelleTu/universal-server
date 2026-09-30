@@ -168,6 +168,22 @@ const TOOLING = {
       input: { type: "object", required: ["panel"], properties: { panel: { type: "string" } } },
     },
     {
+      name: "integratesystem.api",
+      domain: "integratesystem",
+      action: "api",
+      description: "Executes an authenticated operation against any supported Aura System /api module through the trusted service bridge.",
+      input: {
+        type: "object",
+        required: ["method", "path"],
+        properties: {
+          method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+          path: { type: "string", pattern: "^/api/" },
+          query: { type: "object" },
+          body: {},
+        },
+      },
+    },
+    {
       name: "interface.status",
       domain: "interface",
       action: "setStatus",
