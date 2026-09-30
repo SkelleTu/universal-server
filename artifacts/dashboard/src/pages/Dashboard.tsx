@@ -58,7 +58,7 @@ function LoginScreen({ onLogin }: { onLogin: (password: string) => Promise<boole
       
       <div className="z-10 w-full max-w-md p-6">
         <div className="flex flex-col items-center mb-8">
-          <img src="/favicon.svg?v=3" alt="Universal Server" className="w-40 h-40 object-contain mb-6 drop-shadow-[0_0_35px_rgba(30,145,255,.25)]" />
+          <img src="/icons/universal.svg?v=4" alt="Universal Server" className="w-40 h-40 object-contain mb-6 drop-shadow-[0_0_35px_rgba(30,145,255,.25)]" />
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Universal Server</h1>
           <p className="text-sm text-muted-foreground mt-2">Enter your dashboard key to continue</p>
         </div>
