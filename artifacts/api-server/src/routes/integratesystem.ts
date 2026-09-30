@@ -39,7 +39,7 @@ async function callAuraApi(input: { method?: unknown; path?: unknown; query?: un
   try {
     const headers: Record<string, string> = {
       Accept: "application/json",
-      Authorization: `Bearer ${String(process.env.AURA_AGENT_TOKEN ?? "").trim()}`,
+      Authorization: `Bearer ${String(process.env.AURORA_OPERATOR_TOKEN || process.env.AURA_AGENT_TOKEN || "").trim()}`,
       "x-trace-id": correlationIds.traceId,
       "x-request-id": correlationIds.requestId,
       "x-aurora-operator-mode": correlationIds.operatorMode,
@@ -104,7 +104,7 @@ function correlation(req: Request): Correlation {
 }
 
 function authorized(req: Request): boolean {
-  const expected = process.env.AURA_AGENT_TOKEN?.trim();
+  const expected = (process.env.AURORA_OPERATOR_TOKEN || process.env.AURA_AGENT_TOKEN)?.trim();
   if (!expected) return true;
   const supplied = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
   return supplied === expected;
