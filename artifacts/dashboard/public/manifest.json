@@ -2,5 +2,8 @@
   "name":"Universal Server","short_name":"Universal Server","description":"Universal Server Dashboard e API.",
   "start_url":"/","scope":"/","display":"standalone","orientation":"any",
   "background_color":"#090c12","theme_color":"#090c12",
-  "icons":[{"src":"/icons/universal.svg","sizes":"192x192","type":"image/svg+xml","purpose":"any maskable"},{"src":"/icons/universal.svg","sizes":"512x512","type":"image/svg+xml","purpose":"any maskable"}]
+  "icons":[
+    {"src":"/icons/universal-192.webp","sizes":"192x192","type":"image/webp","purpose":"any"},
+    {"src":"/icons/universal-192.webp","sizes":"192x192","type":"image/webp","purpose":"maskable"}
+  ]
 }

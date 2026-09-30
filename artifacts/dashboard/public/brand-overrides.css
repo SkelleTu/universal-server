@@ -1,0 +1,25 @@
+/* Universal Server brand layer */
+body::after {
+  content: "";
+  position: fixed;
+  right: 28px;
+  bottom: 24px;
+  width: 210px;
+  height: 210px;
+  background: url("/icons/universal-192.webp") center / contain no-repeat;
+  opacity: .045;
+  pointer-events: none;
+  z-index: 0;
+  filter: drop-shadow(0 0 28px rgba(30,145,255,.35));
+}
+header h1::before {
+  content: "";
+  display: inline-block;
+  width: 34px;
+  height: 34px;
+  margin-right: 10px;
+  vertical-align: -11px;
+  background: url("/icons/universal-64.webp") center / contain no-repeat;
+  filter: drop-shadow(0 0 12px rgba(30,145,255,.35));
+}
+header h1 { display: inline-flex; align-items: center; }
