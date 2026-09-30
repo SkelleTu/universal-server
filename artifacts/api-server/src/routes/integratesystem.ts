@@ -4,7 +4,89 @@ const router: IRouter = Router();
 const DEFAULT_TIMEOUT_MS = 8000;
 const DEFAULT_READY_TIMEOUT_MS = 40000;
 const DEFAULT_RETRY_DELAY_MS = 1200;
-const ACTIONS = ["health", "status", "diagnostics"] as const;
+const ACTIONS = ["health", "status", "diagnostics", "api"] as const;
+const API_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
+
+function apiPath(value: unknown): string {
+  const path = String(value ?? "").trim();
+  if (!path.startsWith("/api/")) throw new Error("Aura API path must start with /api/");
+  if (path.includes("://") || path.includes("..")) throw new Error("Invalid Aura API path");
+  return path;
+}
+
+function queryString(query: unknown): string {
+  if (!query || typeof query !== "object" || Array.isArray(query)) return "";
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query as Record<string, unknown>)) {
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) value.forEach((item) => params.append(key, String(item)));
+    else params.set(key, String(value));
+  }
+  const encoded = params.toString();
+  return encoded ? `?${encoded}` : "";
+}
+
+async function callAuraApi(input: { method?: unknown; path?: unknown; query?: unknown; body?: unknown }, correlationIds: Correlation) {
+  const base = baseUrl();
+  if (!base) return { ok: false, configured: false, reason: "INTEGRATESYSTEM_URL is not configured", ...correlationIds };
+  const method = String(input.method ?? "GET").trim().toUpperCase();
+  if (!API_METHODS.has(method)) throw new Error(`Unsupported Aura API method: ${method}`);
+  const path = apiPath(input.path);
+  const suffix = queryString(input.query);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(timeoutMs(), 30000));
+  const startedAt = Date.now();
+  try {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      Authorization: `Bearer ${String(process.env.AURA_AGENT_TOKEN ?? "").trim()}`,
+      "x-trace-id": correlationIds.traceId,
+      "x-request-id": correlationIds.requestId,
+      "x-aurora-operator-mode": correlationIds.operatorMode,
+    };
+    const hasBody = input.body !== undefined && method !== "GET" && method !== "DELETE";
+    if (hasBody) headers["content-type"] = "application/json";
+    const response = await fetch(`${base}${path}${suffix}`, {
+      method,
+      headers,
+      ...(hasBody ? { body: JSON.stringify(input.body) } : {}),
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let result: unknown = null;
+    try { result = text ? JSON.parse(text) : null; } catch { result = { raw: text }; }
+    return {
+      ok: response.ok,
+      executed: response.ok,
+      configured: true,
+      method,
+      path,
+      statusCode: response.status,
+      latencyMs: Date.now() - startedAt,
+      traceId: response.headers.get("x-trace-id") ?? correlationIds.traceId,
+      requestId: response.headers.get("x-request-id") ?? correlationIds.requestId,
+      operatorMode: response.headers.get("x-aurora-operator-mode") ?? correlationIds.operatorMode,
+      result,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      executed: false,
+      configured: true,
+      method,
+      path,
+      statusCode: null,
+      latencyMs: Date.now() - startedAt,
+      timedOut: error instanceof Error && error.name === "AbortError",
+      traceId: correlationIds.traceId,
+      requestId: correlationIds.requestId,
+      operatorMode: correlationIds.operatorMode,
+      reason: error instanceof Error ? error.message : "Aura API request failed",
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 type Correlation = { traceId: string; requestId: string; operatorMode: string };
 
@@ -62,6 +144,7 @@ async function getJson(path: string, correlationIds: Correlation) {
     const response = await fetch(`${base}${path}`, {
       headers: {
         Accept: "application/json",
+        Authorization: `Bearer ${String(process.env.AURA_AGENT_TOKEN ?? "").trim()}`,
         "x-trace-id": correlationIds.traceId,
         "x-request-id": correlationIds.requestId,
         "x-aurora-operator-mode": correlationIds.operatorMode,
@@ -129,6 +212,12 @@ router.get("/agent/capabilities", (req, res) => {
       integratesystem: {
         configured: Boolean(baseUrl()),
         actions: ACTIONS,
+        api: {
+          methods: [...API_METHODS],
+          pathPrefix: "/api/",
+          serviceAuth: Boolean(process.env.AURA_AGENT_TOKEN && process.env.AURA_AGENT_OPERATOR_USERNAME),
+          description: "Authenticated operator bridge to the complete IntegrateSystem /api surface.",
+        },
         readiness: {
           timeoutMs: readyTimeoutMs(),
           requestTimeoutMs: timeoutMs(),
@@ -202,6 +291,26 @@ router.post("/agent/action", async (req: Request, res: Response): Promise<void> 
         action,
         state: "ready",
         result: { service: "integratesystem", database, runtime, timestamp: new Date().toISOString() },
+        readiness,
+        ...correlationIds,
+      });
+      return;
+    }
+
+    if (action === "api") {
+      const apiResult = await callAuraApi({
+        method: req.body?.args?.method ?? req.body?.method,
+        path: req.body?.args?.path ?? req.body?.path,
+        query: req.body?.args?.query ?? req.body?.query,
+        body: req.body?.args?.body ?? req.body?.body,
+      }, correlationIds);
+      res.status(apiResult.ok ? 200 : apiResult.statusCode && apiResult.statusCode < 500 ? apiResult.statusCode : 503).json({
+        ok: apiResult.ok,
+        executed: apiResult.executed,
+        domain,
+        action,
+        state: apiResult.ok ? "ready" : "degraded",
+        result: apiResult,
         readiness,
         ...correlationIds,
       });
