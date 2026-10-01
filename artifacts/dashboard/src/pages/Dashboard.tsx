@@ -279,6 +279,63 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
       if (fallbackTimer) window.clearInterval(fallbackTimer);
     };
   }, [password]);
+
+  useEffect(() => {
+    const modelContext = (document as Document & {
+      modelContext?: {
+        registerTool: (
+          definition: {
+            name: string;
+            description: string;
+            inputSchema?: Record<string, unknown>;
+            execute: (input: Record<string, unknown>) => Promise<unknown> | unknown;
+          },
+          options?: { signal?: AbortSignal }
+        ) => void;
+      };
+    }).modelContext;
+
+    if (!modelContext?.registerTool) return;
+
+    const controller = new AbortController();
+
+    modelContext.registerTool({
+      name: 'universal.health',
+      description: 'Read-only health check for the authenticated Universal Server dashboard.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+      execute: async () => {
+        const response = await fetch('/api/healthz', { headers: { 'x-dashboard-key': password } });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data?.error ?? 'Health check failed.');
+        return { ok: true, status: response.status, data };
+      },
+    }, { signal: controller.signal });
+
+    modelContext.registerTool({
+      name: 'universal.dashboardStatus',
+      description: 'Read-only status of the authenticated Universal Server dashboard and MCP control room.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+      execute: async () => {
+        const response = await fetch('/api/dashboard/mcp', {
+          headers: { 'x-dashboard-key': password },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data?.error ?? 'Dashboard status unavailable.');
+        return data;
+      },
+    }, { signal: controller.signal });
+
+    return () => controller.abort();
+  }, [password]);
+
   const originUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
 
   const form = useForm<ProjectFormValues>({
