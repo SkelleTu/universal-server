@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Copy, Plus, Server, Activity, Database, Key, Trash2, Code, Terminal, ChevronRight, LogOut, Check, ShieldCheck, Wifi, AlertTriangle, Clock } from 'lucide-react';
+import { Copy, Plus, Server, Activity, Database, Key, Trash2, Code, Terminal, ChevronRight, LogOut, Check, ShieldCheck, Wifi, AlertTriangle, Clock, Link2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { z } from 'zod';
 import { useForm } from 'react-hook-form';
@@ -15,6 +15,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Switch } from '@/components/ui/switch';
 
 const projectSchema = z.object({
   name: z.string().min(1, 'Project name is required').max(50),
@@ -156,6 +157,9 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
   const [operatorEndpoint, setOperatorEndpoint] = useState('');
   const [operatorCredentials, setOperatorCredentials] = useState('');
   const [operatorSaving, setOperatorSaving] = useState(false);
+  const [unifiedAccess, setUnifiedAccess] = useState(false);
+  const [unifiedPlatforms, setUnifiedPlatforms] = useState<any[]>([]);
+  const [unifiedAccessLoading, setUnifiedAccessLoading] = useState(true);
 
   const generateOperatorToken = async () => {
     setOperatorGenerating(true);
@@ -173,6 +177,40 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
       toast({ title: 'Falha ao gerar token', description: error instanceof Error ? error.message : 'Erro desconhecido', variant: 'destructive' });
     } finally {
       setOperatorGenerating(false);
+    }
+  };
+
+  const loadUnifiedAccess = async () => {
+    setUnifiedAccessLoading(true);
+    try {
+      const response = await fetch('/api/operator/access', { headers: { 'x-dashboard-key': password } });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? 'Não foi possível carregar a autorização unificada.');
+      setUnifiedAccess(data.enabled === true);
+      setUnifiedPlatforms(data.platforms ?? []);
+    } catch (error) {
+      toast({ title: 'Falha na autorização unificada', description: error instanceof Error ? error.message : 'Erro desconhecido', variant: 'destructive' });
+    } finally {
+      setUnifiedAccessLoading(false);
+    }
+  };
+
+  const setUnifiedAccessEnabled = async (enabled: boolean) => {
+    setUnifiedAccessLoading(true);
+    try {
+      const response = await fetch('/api/operator/access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-dashboard-key': password },
+        body: JSON.stringify({ enabled }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? 'Não foi possível alterar a autorização.');
+      setUnifiedAccess(data.enabled === true);
+      toast({ title: enabled ? 'Acesso unificado ativado' : 'Acesso unificado desativado', description: enabled ? 'O ChatGPT pode usar as plataformas conectadas sem copiar tokens entre sistemas.' : 'O acesso do ChatGPT às plataformas conectadas foi bloqueado.' });
+    } catch (error) {
+      toast({ title: 'Falha ao alterar autorização', description: error instanceof Error ? error.message : 'Erro desconhecido', variant: 'destructive' });
+    } finally {
+      setUnifiedAccessLoading(false);
     }
   };
 
@@ -355,6 +393,8 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
 
     return () => controller.abort();
   }, [password, operatorToken]);
+
+  useEffect(() => { void loadUnifiedAccess(); }, [password]);
 
   const originUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
 
@@ -650,6 +690,30 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
               </CardContent>
             </Card>
           </div>
+
+          <Card className="glass-panel border-primary/20 mt-6">
+            <CardContent className="p-5">
+              <div className="flex items-center gap-4">
+                <div className="rounded-xl bg-primary/10 p-3"><Link2 className="w-5 h-5 text-primary" /></div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold">Ponte direta Universal Server ↔ plataformas</div>
+                  <div className="text-sm text-muted-foreground mt-1">Uma única autorização controla o acesso do ChatGPT às plataformas cadastradas. As credenciais permanecem cifradas no Universal Server.</div>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {unifiedPlatforms.length ? unifiedPlatforms.map((item: any) => (
+                      <span key={item.id} className="text-xs rounded-full border border-white/10 bg-black/20 px-2.5 py-1 font-mono">{item.label ?? item.platform}</span>
+                    )) : <span className="text-xs text-muted-foreground">Nenhuma plataforma cadastrada ainda.</span>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="text-right">
+                    <div className={`text-sm font-medium ${unifiedAccess ? 'text-success' : 'text-muted-foreground'}`}>{unifiedAccess ? 'AUTORIZADO' : 'BLOQUEADO'}</div>
+                    <div className="text-[11px] text-muted-foreground">{unifiedPlatforms.length} plataforma(s)</div>
+                  </div>
+                  <Switch checked={unifiedAccess} disabled={unifiedAccessLoading} onCheckedChange={setUnifiedAccessEnabled} />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </section>
 
         {/* MCP Control Room */}
