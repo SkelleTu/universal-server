@@ -32,7 +32,7 @@ router.post("/dashboard/auth", (req, res): void => {
 
 // ── Middleware de autenticação ─────────────────────────────────────────────────
 
-function requireDashboard(req: Request, res: Response, next: NextFunction): void {
+export function requireDashboard(req: Request, res: Response, next: NextFunction): void {
   const key = req.headers["x-dashboard-key"];
   if (key !== DASHBOARD_PASSWORD) {
     res.status(401).json({ error: "Não autorizado" });
