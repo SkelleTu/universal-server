@@ -308,7 +308,7 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
         additionalProperties: false,
       },
       execute: async () => {
-        const response = await fetch('/api/healthz', { headers: { 'x-dashboard-key': password } });
+        const response = await fetch('/api/healthz');
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data?.error ?? 'Health check failed.');
         return { ok: true, status: response.status, data };
@@ -333,8 +333,28 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
       },
     }, { signal: controller.signal });
 
+    if (operatorToken) {
+      modelContext.registerTool({
+        name: 'operator.status',
+        description: 'Read-only status and metadata of credentials stored in the Universal Server Operator vault. Never returns credential secrets.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+          additionalProperties: false,
+        },
+        execute: async () => {
+          const response = await fetch('/api/operator/status', {
+            headers: { Authorization: \`Bearer \${operatorToken}\` },
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data?.error ?? 'Operator status unavailable.');
+          return data;
+        },
+      }, { signal: controller.signal });
+    }
+
     return () => controller.abort();
-  }, [password]);
+  }, [password, operatorToken]);
 
   const originUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
 
