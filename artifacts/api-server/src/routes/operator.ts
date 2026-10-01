@@ -147,6 +147,21 @@ export async function executeOperatorPlatformRequest(input: {
   }
 }
 
+function validMasterCookie(req: Request): boolean {
+  const cookieHeader = String(req.headers.cookie ?? "");
+  const raw = cookieHeader.split(";").map((item) => item.trim()).find((item) => item.startsWith("universal_master_session="))?.slice("universal_master_session=".length);
+  if (!raw) return false;
+  const parts = raw.split(".");
+  if (parts.length !== 4 || parts[0] !== "v1") return false;
+  const dashboardPassword = String(process.env.DASHBOARD_PASSWORD ?? "").trim();
+  if (!dashboardPassword) return false;
+  const issuedAt = Number(parts[1]);
+  if (!Number.isFinite(issuedAt) || Date.now() - issuedAt > 1000 * 60 * 60 * 24 * 30 || issuedAt > Date.now() + 60_000) return false;
+  const payload = parts.slice(0, 3).join(".");
+  const expected = crypto.createHmac("sha256", dashboardPassword).update(payload).digest("base64url");
+  return expected.length === parts[3].length && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(parts[3]));
+}
+
 async function validOperator(req: Request, res: Response): Promise<boolean> {
   const supplied = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
   if (!supplied) {
@@ -163,6 +178,25 @@ async function validOperator(req: Request, res: Response): Promise<boolean> {
   }
   return true;
 }
+
+router.post("/operator/execute", async (req, res): Promise<void> => {
+  const authorized = validMasterCookie(req) || await validOperator(req, res);
+  if (!authorized) return;
+  try {
+    const result = await executeOperatorPlatformRequest({
+      platform: req.body?.platform,
+      method: req.body?.method,
+      path: req.body?.path,
+      query: req.body?.query,
+      body: req.body?.body,
+      traceId: req.body?.traceId,
+      requestId: req.body?.requestId,
+    });
+    res.status(result.status && result.status >= 400 ? result.status : 200).json(result);
+  } catch (error) {
+    res.status(502).json({ ok: false, executed: false, error: error instanceof Error ? error.message : "Platform request failed." });
+  }
+});
 
 router.get("/operator/status", async (req, res): Promise<void> => {
   if (!(await validOperator(req, res))) return;
