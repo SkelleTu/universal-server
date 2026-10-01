@@ -13,6 +13,7 @@ import supremeRouter from "./supreme";
 import agentRouter from "./agent";
 import auroraToolingRouter from "./aurora-tooling";
 import mcpRouter from "./mcp";
+import operatorRouter from "./operator";
 
 const router: IRouter = Router();
 
@@ -25,13 +26,11 @@ router.use(googleRouter);
 router.use(playerStateRouter);
 router.use(multiplayerRouter);
 router.use(authRouter);
-// The existing Aurora bridge enters through the single Supreme operator gate.
 router.use(supremeRouter);
-// Delegated IntegrateSystem actions remain ahead of the generic agent handler.
 router.use(integrateSystemRouter);
-// Dynamic Aurora tooling is exposed separately from the legacy action catalog.
 router.use(auroraToolingRouter);
 router.use(mcpRouter);
+router.use(operatorRouter);
 router.use(agentRouter);
 
 export default router;
