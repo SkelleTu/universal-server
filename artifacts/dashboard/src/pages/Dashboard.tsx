@@ -422,7 +422,6 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
         return data;
       },
     }, { signal: controller.signal });
-    }
 
     return () => controller.abort();
   }, [password, operatorToken]);
