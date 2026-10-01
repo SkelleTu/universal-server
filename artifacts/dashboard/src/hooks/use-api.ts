@@ -31,6 +31,7 @@ export function useApiAuth() {
   };
 
   const logout = useCallback(() => {
+    void fetch('/api/dashboard/logout', { method: 'POST', credentials: 'include' }).catch(() => undefined);
     setPassword('');
   }, [setPassword]);
 
