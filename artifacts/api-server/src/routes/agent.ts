@@ -28,6 +28,82 @@ const ACTIONS = {
   interface: ["state", "notify", "setPanel", "setStatus"],
 } as const;
 
+function integrationTargets(): Record<string, { baseUrl: string; token?: string; actionPath?: string }> {
+  const targets: Record<string, { baseUrl: string; token?: string; actionPath?: string }> = {};
+  try {
+    const raw = process.env.INTEGRATION_TARGETS_JSON?.trim();
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        for (const [name, value] of Object.entries(parsed)) {
+          if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+          const item = value as Record<string, unknown>;
+          const baseUrl = String(item.baseUrl ?? item.url ?? "").trim().replace(/\\/$/, "");
+          if (!baseUrl) continue;
+          targets[name.toLowerCase()] = {
+            baseUrl,
+            token: String(item.token ?? "").trim() || undefined,
+            actionPath: String(item.actionPath ?? "/api/agent/action").trim() || "/api/agent/action",
+          };
+        }
+      }
+    }
+  } catch {
+    // Invalid registry is treated as empty. Local actions remain available.
+  }
+
+  const auraUrl = String(process.env.AURA_SYSTEM_URL ?? "").trim().replace(/\\/$/, "");
+  if (auraUrl && !targets.aura) {
+    targets.aura = {
+      baseUrl: auraUrl,
+      token: String(process.env.AURA_SYSTEM_TOKEN ?? "").trim() || undefined,
+      actionPath: String(process.env.AURA_SYSTEM_ACTION_PATH ?? "/api/agent/action").trim() || "/api/agent/action",
+    };
+  }
+  return targets;
+}
+
+async function forwardIntegrationAction(
+  target: string,
+  domain: string,
+  action: string,
+  args: Record<string, unknown>,
+  req: Request,
+) {
+  const config = integrationTargets()[target];
+  if (!config) return null;
+
+  const traceId = String(req.headers["x-trace-id"] ?? crypto.randomUUID());
+  const requestId = String(req.headers["x-request-id"] ?? crypto.randomUUID());
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "x-trace-id": traceId,
+    "x-request-id": requestId,
+    "x-universal-target": target,
+  };
+  if (config.token) headers.authorization = `Bearer ${config.token}`;
+
+  const response = await fetch(`${config.baseUrl}${config.actionPath ?? "/api/agent/action"}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ target, domain, action, args, traceId, requestId }),
+  });
+
+  const text = await response.text();
+  let body: unknown;
+  try { body = text ? JSON.parse(text) : null; } catch { body = { raw: text }; }
+
+  return {
+    status: response.status,
+    ok: response.ok,
+    target,
+    forwarded: true,
+    traceId: response.headers.get("x-trace-id") ?? traceId,
+    requestId: response.headers.get("x-request-id") ?? requestId,
+    result: body,
+  };
+}
+
 const RUNTIME_NAMESPACE = "aurora-runtime";
 const RUNTIME_DOMAINS = ["avatar", "scene", "animation", "voice", "interface"] as const;
 
@@ -161,7 +237,7 @@ async function weather(lat: number, lng: number) {
 
 router.get("/agent/capabilities", (req, res) => {
   if (!authorized(req)) {
-    res.status(401).json({ ok: false, error: "Aurora agent authorization required" });
+    res.status(401).json({ ok: false, error: "Universal agent authorization required" });
     return;
   }
   res.json({
@@ -189,9 +265,40 @@ router.post("/agent/action", async (req: Request, res: Response): Promise<void> 
     return;
   }
 
+  const target = String(req.body?.target ?? "local").trim().toLowerCase() || "local";
+
+  // The universal gateway owns routing. A configured target is forwarded without
+  // interpreting its domain/action locally. This keeps platform-specific actions
+  // out of the gateway and prevents one platform from becoming the central API.
+  if (target !== "local" && target !== "universal") {
+    try {
+      const forwarded = await forwardIntegrationAction(target, domain, action, args, req);
+      if (forwarded) {
+        res.status(forwarded.status).json(forwarded);
+        return;
+      }
+      res.status(404).json({
+        ok: false,
+        routed: false,
+        error: "Integration target is not configured",
+        target,
+        availableTargets: Object.keys(integrationTargets()),
+      });
+      return;
+    } catch (error) {
+      res.status(502).json({
+        ok: false,
+        routed: true,
+        target,
+        error: error instanceof Error ? error.message : "Integration target request failed",
+      });
+      return;
+    }
+  }
+
   const available = (ACTIONS as Record<string, readonly string[]>)[domain];
   if (!available || !available.includes(action)) {
-    res.status(404).json({ ok: false, error: "Unsupported Aurora action", domain, action, available: ACTIONS });
+    res.status(404).json({ ok: false, error: "Unsupported local action", domain, action, available: ACTIONS });
     return;
   }
 
