@@ -38,7 +38,12 @@ async function unifiedAccessState() {
   const project = await pgGetOrCreateSystemProject();
   const rows = await pgListCollection(project.id, ACCESS_COLLECTION, 10);
   const row = rows[0];
-  return { enabled: row?.data?.enabled === true, updatedAt: row?.updated_at ?? row?.data?.updatedAt ?? null };
+  const autoEnabled = String(process.env.UNIVERSAL_OPERATOR_AUTO_ENABLE ?? "").trim().toLowerCase() === "true";
+  return {
+    enabled: autoEnabled || row?.data?.enabled === true,
+    updatedAt: row?.updated_at ?? row?.data?.updatedAt ?? (autoEnabled ? new Date().toISOString() : null),
+    mode: autoEnabled ? "service-bridge-auto" : "unified-platform-bridge",
+  };
 }
 
 export async function getUnifiedOperatorAccess() {
