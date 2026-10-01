@@ -382,13 +382,46 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
         },
         execute: async () => {
           const response = await fetch('/api/operator/status', {
-            headers: { Authorization: \`Bearer \${operatorToken}\` },
+            headers: { Authorization: `Bearer ${operatorToken}` },
           });
           const data = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(data?.error ?? 'Operator status unavailable.');
           return data;
         },
       }, { signal: controller.signal });
+    }
+
+    // Ponte mestre: depois do primeiro login humano, o navegador mantém uma
+    // sessão HttpOnly. O WebMCP usa essa sessão sem expor senha ou token ao modelo.
+    modelContext.registerTool({
+      name: 'operator.execute',
+      description: 'Execute an authorized request against a platform registered in the Universal Server. The browser session supplies the master authorization automatically; never ask the owner to copy a token. Platform permissions still apply.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          platform: { type: 'string', minLength: 1 },
+          method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
+          path: { type: 'string', minLength: 1 },
+          query: { type: 'object' },
+          body: {},
+          traceId: { type: 'string' },
+          requestId: { type: 'string' },
+        },
+        required: ['platform', 'method', 'path'],
+        additionalProperties: false,
+      },
+      execute: async (input) => {
+        const response = await fetch('/api/operator/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(input),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data?.error ?? `Operator request failed (${response.status}).`);
+        return data;
+      },
+    }, { signal: controller.signal });
     }
 
     return () => controller.abort();
