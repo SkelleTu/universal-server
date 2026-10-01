@@ -149,6 +149,57 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
   const [isNewProjectOpen, setIsNewProjectOpen] = useState(false);
   const [mcpStatus, setMcpStatus] = useState<any>(null);
   const [mcpLoading, setMcpLoading] = useState(true);
+  const [operatorToken, setOperatorToken] = useState<string | null>(null);
+  const [operatorGenerating, setOperatorGenerating] = useState(false);
+  const [operatorPlatform, setOperatorPlatform] = useState('aura-system');
+  const [operatorLabel, setOperatorLabel] = useState('Aura System');
+  const [operatorEndpoint, setOperatorEndpoint] = useState('');
+  const [operatorCredentials, setOperatorCredentials] = useState('');
+  const [operatorSaving, setOperatorSaving] = useState(false);
+
+  const generateOperatorToken = async () => {
+    setOperatorGenerating(true);
+    try {
+      const response = await fetch('/api/operator/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-dashboard-key': password },
+        body: JSON.stringify({ label: 'ChatGPT Operator' }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.token) throw new Error(data.error ?? 'Não foi possível gerar a token.');
+      setOperatorToken(data.token);
+      toast({ title: 'Token do Operator gerada', description: 'Copie agora. Ela não é armazenada em texto aberto.' });
+    } catch (error) {
+      toast({ title: 'Falha ao gerar token', description: error instanceof Error ? error.message : 'Erro desconhecido', variant: 'destructive' });
+    } finally {
+      setOperatorGenerating(false);
+    }
+  };
+
+  const saveOperatorCredential = async () => {
+    setOperatorSaving(true);
+    try {
+      let credentials: Record<string, unknown>;
+      try {
+        credentials = JSON.parse(operatorCredentials);
+      } catch {
+        throw new Error('As credenciais precisam estar em JSON válido.');
+      }
+      const response = await fetch('/api/operator/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-dashboard-key': password },
+        body: JSON.stringify({ platform: operatorPlatform, label: operatorLabel, endpoint: operatorEndpoint, credentials }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? 'Não foi possível salvar a credencial.');
+      setOperatorCredentials('');
+      toast({ title: 'Credencial armazenada', description: `${operatorLabel} foi cifrada no Universal Server.` });
+    } catch (error) {
+      toast({ title: 'Falha ao salvar credencial', description: error instanceof Error ? error.message : 'Erro desconhecido', variant: 'destructive' });
+    } finally {
+      setOperatorSaving(false);
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -472,6 +523,57 @@ function DashboardApp({ password, onLogout }: { password: string, onLogout: () =
             ))}
           </div>
         )}
+
+        {/* ChatGPT Operator Vault */}
+        <section className="mb-16">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-bold tracking-tight flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-primary" /> Operator / ChatGPT Operator</h2>
+              <p className="text-sm text-muted-foreground">Acesso programático autorizado pelo seu login administrativo, sem novo login humano a cada operação.</p>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-success"><span className="w-2 h-2 rounded-full bg-success" /> Cofre ativo</div>
+          </div>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <Card className="glass-panel border-white/5">
+              <CardHeader>
+                <CardTitle className="text-lg">Credencial do ChatGPT Operator</CardTitle>
+                <CardDescription>Gere uma token de serviço. O valor completo aparece somente nesta tela após a geração e o banco guarda apenas o hash.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Button onClick={generateOperatorToken} disabled={operatorGenerating} className="w-full">
+                  <Key className="w-4 h-4 mr-2" />
+                  {operatorGenerating ? 'Gerando...' : 'Gerar token de acesso'}
+                </Button>
+                {operatorToken && (
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">Token gerada agora</Label>
+                    <div className="bg-black/40 border border-white/10 rounded-md p-3 font-mono text-xs break-all">{operatorToken}</div>
+                    <Button variant="outline" className="w-full" onClick={() => { void navigator.clipboard.writeText(operatorToken); toast({ title: 'Token copiada' }); }}>
+                      <Copy className="w-4 h-4 mr-2" /> Copiar token
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            <Card className="glass-panel border-white/5">
+              <CardHeader>
+                <CardTitle className="text-lg">Credenciais das plataformas</CardTitle>
+                <CardDescription>O payload é cifrado antes de ser armazenado. O Operator consulta apenas a plataforma solicitada.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label>Platform</Label><Input value={operatorPlatform} onChange={e => setOperatorPlatform(e.target.value)} className="bg-black/20 mt-1" /></div>
+                  <div><Label>Nome</Label><Input value={operatorLabel} onChange={e => setOperatorLabel(e.target.value)} className="bg-black/20 mt-1" /></div>
+                </div>
+                <div><Label>Endpoint</Label><Input value={operatorEndpoint} onChange={e => setOperatorEndpoint(e.target.value)} placeholder="https://..." className="bg-black/20 mt-1" /></div>
+                <div><Label>Credenciais JSON</Label><textarea value={operatorCredentials} onChange={e => setOperatorCredentials(e.target.value)} placeholder='{"username":"...","password":"..."}' className="mt-1 min-h-28 w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs font-mono outline-none focus:ring-1 focus:ring-primary" /></div>
+                <Button onClick={saveOperatorCredential} disabled={operatorSaving || !operatorCredentials.trim()} variant="outline" className="w-full">
+                  {operatorSaving ? 'Cifrando e salvando...' : 'Salvar credencial no cofre'}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </section>
 
         {/* MCP Control Room */}
         <section className="mb-12 border-t border-white/10 pt-12">
