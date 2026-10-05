@@ -38,7 +38,7 @@ function integrationTargets(): Record<string, { baseUrl: string; token?: string;
         for (const [name, value] of Object.entries(parsed)) {
           if (!value || typeof value !== "object" || Array.isArray(value)) continue;
           const item = value as Record<string, unknown>;
-          const baseUrl = String(item.baseUrl ?? item.url ?? "").trim().replace(/\\/$/, "");
+          const baseUrl = String(item.baseUrl ?? item.url ?? "").trim().replace(/\/$/, "");
           if (!baseUrl) continue;
           targets[name.toLowerCase()] = {
             baseUrl,
@@ -52,7 +52,7 @@ function integrationTargets(): Record<string, { baseUrl: string; token?: string;
     // Invalid registry is treated as empty. Local actions remain available.
   }
 
-  const auraUrl = String(process.env.AURA_SYSTEM_URL ?? "").trim().replace(/\\/$/, "");
+  const auraUrl = String(process.env.AURA_SYSTEM_URL ?? "").trim().replace(/\/$/, "");
   if (auraUrl && !targets.aura) {
     targets.aura = {
       baseUrl: auraUrl,
