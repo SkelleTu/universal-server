@@ -82,7 +82,7 @@ router.get("/game/google/autocomplete", async (req: Request, res: Response): Pro
       },
       body: JSON.stringify(body),
     });
-    const payload = await response.json();
+    const payload: any = await response.json();
     if (!response.ok) {
       res.status(502).json({ error: "Google Places Autocomplete falhou", details: payload?.error?.message ?? "Google API error" });
       return;
@@ -137,7 +137,7 @@ router.get("/game/google/place-details", async (req: Request, res: Response): Pr
         "X-Goog-FieldMask": "id,formattedAddress,location",
       },
     });
-    const payload = await response.json();
+    const payload: any = await response.json();
     if (!response.ok) {
       res.status(502).json({ error: "Google Place Details falhou", details: payload?.error?.message ?? "Google API error" });
       return;
@@ -174,7 +174,7 @@ router.get("/game/google/geocode", async (req: Request, res): Promise<void> => {
   if (!isArarasAddress(address)) { res.status(403).json({ error: "Public search is available only for Araras, SP addresses" }); return; }
   const params = new URLSearchParams({ address, key: googleKey });
   const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params.toString()}`);
-  const payload = await response.json();
+  const payload: any = await response.json();
   res.status(response.ok ? 200 : 502).json(payload);
 });
 
@@ -186,7 +186,7 @@ router.get("/game/google/reverse-geocode", authenticate, async (req: AuthedReque
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) { res.status(400).json({ error: "lat e lng válidos são obrigatórios" }); return; }
   const params = new URLSearchParams({ latlng: `${lat},${lng}`, key: googleKey });
   const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params.toString()}`);
-  const payload = await response.json();
+  const payload: any = await response.json();
   res.status(response.ok ? 200 : 502).json(payload);
 });
 
@@ -198,7 +198,7 @@ router.get("/game/google/elevation", authenticate, async (req: AuthedRequest, re
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) { res.status(400).json({ error: "lat e lng válidos são obrigatórios" }); return; }
   const params = new URLSearchParams({ locations: `${lat},${lng}`, key: googleKey });
   const response = await fetch(`https://maps.googleapis.com/maps/api/elevation/json?${params.toString()}`);
-  const payload = await response.json();
+  const payload: any = await response.json();
   res.status(response.ok ? 200 : 502).json(payload);
 });
 
@@ -211,7 +211,7 @@ router.get("/game/google/timezone", authenticate, async (req: AuthedRequest, res
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(timestamp)) { res.status(400).json({ error: "lat, lng e timestamp válidos são obrigatórios" }); return; }
   const params = new URLSearchParams({ location: `${lat},${lng}`, timestamp: String(Math.floor(timestamp)), key: googleKey });
   const response = await fetch(`https://maps.googleapis.com/maps/api/timezone/json?${params.toString()}`);
-  const payload = await response.json();
+  const payload: any = await response.json();
   res.status(response.ok ? 200 : 502).json(payload);
 });
 
