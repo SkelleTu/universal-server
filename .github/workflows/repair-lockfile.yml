@@ -1,4 +1,5 @@
 name: Repair pnpm lockfile
+# Trigger repair after dependency manifest changes
 
 on:
   push:
