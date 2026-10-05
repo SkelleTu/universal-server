@@ -14,6 +14,7 @@ import agentRouter from "./agent";
 import auroraToolingRouter from "./aurora-tooling";
 import mcpRouter from "./mcp";
 import operatorRouter from "./operator";
+import invistaSessionRouter from "./invista-session";
 
 const router: IRouter = Router();
 
@@ -31,6 +32,7 @@ router.use(integrateSystemRouter);
 router.use(auroraToolingRouter);
 router.use(mcpRouter);
 router.use(operatorRouter);
+router.use(invistaSessionRouter);
 router.use(agentRouter);
 
 export default router;
