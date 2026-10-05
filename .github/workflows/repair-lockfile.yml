@@ -22,7 +22,7 @@ jobs:
       - name: Regenerate lockfile
         run: |
           pnpm install --lockfile-only --no-frozen-lockfile
-          pnpm add @modelcontextprotocol/sdk@1.30.1 --lockfile-only --ignore-scripts
+          pnpm --filter @workspace/api-server add @modelcontextprotocol/sdk@1.30.1 --lockfile-only --ignore-scripts
           pnpm install --frozen-lockfile
       - name: Commit regenerated lockfile
         run: |
