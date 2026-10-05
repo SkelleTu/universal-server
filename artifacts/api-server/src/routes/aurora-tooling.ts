@@ -250,7 +250,7 @@ router.post("/agent/tooling/execute", async (req: Request, res: Response): Promi
     };
   });
 
-  const unsupported = plan.filter((step) => !step.supported);
+  const unsupported = plan.filter((step: (typeof plan)[number]) => !step.supported);
   if (unsupported.length > 0) {
     res.status(400).json({ ok: false, error: "unsupported tooling step", unsupported, availableTools: TOOLING.tools.map((tool) => tool.name) });
     return;
