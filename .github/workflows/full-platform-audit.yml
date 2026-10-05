@@ -1,4 +1,5 @@
 name: Universal Server Full Platform Audit
+# Security-clean baseline after dependency graph repair
 
 on:
   push:
