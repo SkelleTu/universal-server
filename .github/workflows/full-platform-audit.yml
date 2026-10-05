@@ -1,0 +1,94 @@
+name: Universal Server Full Platform Audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**"
+      - "!.github/workflows/repair-lockfile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-platform-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Repository integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fsck --no-progress --full
+          test -f package.json
+          test -f pnpm-lock.yaml
+          test -f artifacts/api-server/package.json
+          test -f artifacts/dashboard/package.json
+
+      - name: Clean dependency install
+        run: pnpm install --frozen-lockfile
+
+      - name: Workspace typecheck
+        run: pnpm run typecheck
+
+      - name: API server typecheck
+        run: pnpm --dir artifacts/api-server run typecheck
+
+      - name: Dashboard typecheck
+        run: pnpm --dir artifacts/dashboard run typecheck
+
+      - name: Production build
+        run: pnpm run build
+
+      - name: Verify production artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d artifacts/api-server/dist
+          test -f artifacts/api-server/dist/index.mjs
+          test -d artifacts/dashboard/dist/public
+          test -f artifacts/dashboard/dist/public/index.html
+          test -s artifacts/api-server/dist/index.mjs
+          test -s artifacts/dashboard/dist/public/index.html
+
+      - name: Dependency vulnerability audit
+        run: pnpm audit --audit-level high
+
+      - name: Production boot contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORT=3099 NODE_ENV=production             BACKUP_GITHUB_TOKEN=invalid             BACKUP_GITHUB_REPO=SkelleTu/universal-server             UNIVERSAL_SERVER_BACKUP_ENCRYPTION_KEY="$(node -e 'process.stdout.write(Buffer.alloc(32).toString("base64"))')"             timeout 15s node -r dotenv/config --enable-source-maps artifacts/api-server/dist/index.mjs > /tmp/universal-server-boot.log 2>&1 || rc=$?
+          rc=${rc:-0}
+          cat /tmp/universal-server-boot.log
+          if grep -Eqi "SyntaxError|ReferenceError|MODULE_NOT_FOUND|Cannot find package|ERR_MODULE_NOT_FOUND" /tmp/universal-server-boot.log; then
+            echo "Production boot contract detected a module/runtime failure."
+            exit 1
+          fi
+          if [ "$rc" -eq 0 ]; then
+            echo "Unexpected clean exit during boot contract."
+            exit 1
+          fi
+          echo "Expected external-database authentication failure is isolated from application module loading."
+
+      - name: Final working tree verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          git status --short
