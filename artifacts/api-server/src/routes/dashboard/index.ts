@@ -15,10 +15,9 @@ import { getMcpMonitorSnapshot, streamMcpMonitor } from "../mcp";
 const router: IRouter = Router();
 
 // Nunca use uma senha administrativa padrão em produção.
-const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD?.trim();
-if (!DASHBOARD_PASSWORD) {
+const DASHBOARD_PASSWORD: string = process.env.DASHBOARD_PASSWORD?.trim() ?? (() => {
   throw new Error("DASHBOARD_PASSWORD environment variable is required.");
-}
+})();
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
