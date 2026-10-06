@@ -61,7 +61,13 @@ export async function getDerivAccounts(token: string): Promise<unknown> {
 }
 
 export async function resolveDerivAccount(token: string, accountType: DerivAccountType, preferredAccountId?: string): Promise<string> {
-  if (preferredAccountId?.trim()) return preferredAccountId.trim();
+  if (preferredAccountId?.trim()) {
+    const requestedId = preferredAccountId.trim();
+    const response = await getDerivAccounts(token);
+    const match = objects(response).find(account => idOf(account) === requestedId && typeOf(account) === accountType);
+    if (!match) throw new Error(`Deriv account ${requestedId} is not a ${accountType} account or is not available to this token`);
+    return requestedId;
+  }
   const response = await getDerivAccounts(token);
   const match = objects(response).find(account => typeOf(account) === accountType && idOf(account));
   if (!match) throw new Error(`No Deriv Options ${accountType} account found`);
