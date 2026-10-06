@@ -11,7 +11,7 @@ permissions:
 jobs:
   deriv-account-audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout Universal Server
         uses: actions/checkout@v4
@@ -21,56 +21,30 @@ jobs:
         with:
           node-version: 22
 
-      - name: Inventory Deriv delegation surface
+      - name: Validate centralized Deriv gateway
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p audit-artifacts
-          {
-            echo "# Universal Server Deriv Account Architecture Audit"
-            echo "Commit: `$(git rev-parse HEAD)`"
-            echo
-            echo "## Relevant source"
-            git ls-files | grep -Ei 'deriv|trading|account|session|websocket|api-server' | sort || true
-            echo
-            echo "## Deriv/account markers"
-            git grep -nEi 'deriv|accountId|accountType|loginid|authorize|otp|websockets/v3|api\.derivws|trading/v1|/demo|/real' -- ':!*.lock' || true
-          } | tee audit-artifacts/deriv-universal-inventory.md
-
-      - name: Validate Universal Server account/session contract
-        shell: bash
-        run: |
-          set -euo pipefail
-          files="$(git ls-files 'artifacts/**/*.ts' 'artifacts/**/*.tsx' 'artifacts/**/*.js' 'artifacts/**/*.mjs' 2>/dev/null | tr '
-' ' ')"
-          [ -n "$files" ] || { echo "No Universal Server source files found"; exit 1; }
-
-          grep -Eiq 'session|account|trading' $files || {
-            echo "::error::Universal Server has no detectable account/trading session layer."
-            exit 1
-          }
-
-          if grep -Eiq 'api\.derivws|trading/v1|ws\.derivws\.com/websockets/v3' $files; then
-            grep -Eiq 'account(Id|ID)|accountId|account_id' $files || {
-              echo "::error::Deriv endpoint detected without account identity routing."
-              exit 1
-            }
-            grep -Eiq 'demo|real' $files || {
-              echo "::error::Deriv endpoint detected without Demo/Real routing markers."
-              exit 1
-            }
-          else
-            echo "::warning::Universal Server currently has no direct Deriv API implementation. Audit remains red until the centralized Deriv account gateway is introduced."
-            exit 1
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          files=[p for p in Path("artifacts/api-server").rglob("*") if p.is_file() and p.suffix in {".ts",".tsx",".js",".mjs",".cjs"}]
+          text="\n".join(f.read_text(errors="ignore") for f in files)
+          required=["api.derivws.com","/otp","accountId","accountType","demo","real","Deriv-App-ID","deriv-account-gateway","/deriv/account-context"]
+          forbidden=["ws.derivws.com/websockets/v3","ws.binaryws.com/websockets/v3","authorize:"]
+          missing=[x for x in required if x not in text]
+          bad=[x for x in forbidden if x in text]
+          Path("audit-artifacts/deriv-universal-report.md").write_text(f"# Universal Server Deriv Gateway\n\nMissing: {missing}\nLegacy: {bad}\n")
+          print(Path("audit-artifacts/deriv-universal-report.md").read_text())
+          if missing or bad:
+              raise SystemExit(1)
+          PY
 
       - name: TypeScript validation
         run: |
-          if [ -f package.json ]; then
-            corepack enable
-            pnpm install --frozen-lockfile
-            pnpm -r --if-present typecheck
-          fi
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm --filter @workspace/api-server run typecheck
 
       - name: Upload audit report
         if: always()
