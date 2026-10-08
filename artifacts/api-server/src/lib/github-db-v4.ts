@@ -7,6 +7,7 @@ const DB_PATH = "universal-server-data/database.enc";
 const LEGACY_MANIFEST = "runtime-backups/latest.json";
 const LEGACY_PREFIX = "runtime-backups/chunks/";
 const KEY_ENV = "UNIVERSAL_SERVER_BACKUP_ENCRYPTION_KEY";
+const LEGACY_KEY_ENV = "BACKUP_ENCRYPTION_KEY";
 const TEXT_FORMAT = "USDB2";
 const RAW_FORMAT = "USDB1";
 const DEBOUNCE_MS = 15_000;
@@ -34,12 +35,12 @@ let lastPersistError: string | null = null;
 function cfg() {
   const token = process.env.BACKUP_GITHUB_TOKEN?.trim();
   const repo = process.env.BACKUP_GITHUB_REPO?.trim();
-  const enc = process.env[KEY_ENV]?.trim();
+  const enc = process.env[KEY_ENV]?.trim() ?? process.env[LEGACY_KEY_ENV]?.trim();
   if (!token) throw new Error("BACKUP_GITHUB_TOKEN environment variable is required.");
   if (!repo) throw new Error("BACKUP_GITHUB_REPO environment variable is required.");
-  if (!enc) throw new Error(`${KEY_ENV} environment variable is required.`);
+  if (!enc) throw new Error(`${KEY_ENV} or ${LEGACY_KEY_ENV} environment variable is required.`);
   const key = Buffer.from(enc, "base64");
-  if (key.length !== 32) throw new Error(`${KEY_ENV} must be base64-encoded 32 bytes`);
+  if (key.length !== 32) throw new Error(`${KEY_ENV} or ${LEGACY_KEY_ENV} must be base64-encoded 32 bytes`);
   return { token, repo, key };
 }
 
