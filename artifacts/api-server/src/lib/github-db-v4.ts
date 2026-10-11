@@ -280,6 +280,32 @@ export async function initGitHubDatabase(): Promise<void> {
       return;
     }
 
+    if (currentSnapshot && !snapshotHasData(currentSnapshot)) {
+      // A decryptable but empty current snapshot must not hide a populated legacy backup.
+      // The legacy manifest and chunks are stored alongside the current snapshot.
+      let legacyRecovery: DatabaseSnapshot | null = null;
+      let legacyRecoveryError: unknown = null;
+      try {
+        legacyRecovery = await legacy();
+      } catch (err) {
+        legacyRecoveryError = err;
+        logger.error({ err }, "Current database is empty; legacy backup validation failed");
+      }
+      if (legacyRecovery && snapshotHasData(legacyRecovery)) {
+        state = legacyRecovery;
+        dirty = true;
+        await persistNow();
+        logger.warn({ repository: c.repo, path: DB_PATH }, "Universal Server database recovered from populated legacy backup");
+        return;
+      }
+      if (legacyRecoveryError) {
+        throw new Error(
+          "Current Universal Server database is empty and the legacy backup could not be validated. Refusing to continue with potentially incomplete state.",
+          { cause: legacyRecoveryError },
+        );
+      }
+    }
+
     if (currentSnapshot) {
       if (!snapshotHasData(currentSnapshot) && recovery.unreadableCount > 0) {
         throw new Error(
@@ -288,7 +314,7 @@ export async function initGitHubDatabase(): Promise<void> {
       }
       state = currentSnapshot;
       lastPersistAt = new Date().toISOString();
-      logger.info({ repository: c.repo, path: DB_PATH, format: current.text.trim().startsWith(`${TEXT_FORMAT}\n`) ? TEXT_FORMAT : RAW_FORMAT }, "GitHub database loaded");
+      logger.info({ repository: c.repo, path: DB_PATH, format: current.text.trim().startsWith(`${TEXT_FORMAT}\\n`) ? TEXT_FORMAT : RAW_FORMAT }, "GitHub database loaded");
       return;
     }
 
