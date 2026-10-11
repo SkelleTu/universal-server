@@ -22,3 +22,5 @@ services:
         sync: false
       - key: UNIVERSAL_SERVER_BACKUP_ENCRYPTION_KEY
         sync: false
+      - key: BACKUP_ENCRYPTION_KEY
+        sync: false
