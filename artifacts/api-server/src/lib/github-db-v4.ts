@@ -249,14 +249,16 @@ export async function initGitHubDatabase(): Promise<void> {
       await quarantine(current);
     }
 
+    if (currentSnapshot && snapshotHasData(currentSnapshot)) {
+      state = currentSnapshot;
+      lastPersistAt = new Date().toISOString();
+      logger.info({ repository: c.repo, path: DB_PATH, format: current.text.trim().startsWith(`${TEXT_FORMAT}\n`) ? TEXT_FORMAT : RAW_FORMAT }, "GitHub database loaded");
+      return;
+    }
+
     const recovery = await recoverQuarantinedSnapshot(c.keys);
     if (recovery.snapshot) {
       // Preserve the current file before replacing it with recovered state.
-      if (currentSnapshot && snapshotHasData(currentSnapshot)) {
-        state = currentSnapshot;
-        lastPersistAt = new Date().toISOString();
-        return;
-      }
       state = recovery.snapshot;
       dirty = true;
       await persistNow();
@@ -287,7 +289,14 @@ export async function initGitHubDatabase(): Promise<void> {
     );
   }
 
-  const legacySnapshot = await legacy();
+  let legacySnapshot: DatabaseSnapshot | null = null;
+  let legacyError: unknown = null;
+  try {
+    legacySnapshot = await legacy();
+  } catch (err) {
+    legacyError = err;
+    logger.error({ err }, "Legacy snapshot could not be migrated; checking preserved recovery snapshots before failing closed");
+  }
   if (legacySnapshot) {
     state = legacySnapshot;
     dirty = true;
@@ -304,8 +313,8 @@ export async function initGitHubDatabase(): Promise<void> {
     logger.warn({ repository: c.repo, recoveredFrom: recovery.path }, "Universal Server database recovered from quarantine");
     return;
   }
-  if (recovery.unreadableCount > 0) {
-    throw new Error("No current database exists but quarantined snapshots cannot be decrypted. Refusing to initialize an empty database until the historical encryption key is restored.");
+  if (recovery.unreadableCount > 0 || legacyError) {
+    throw new Error("No usable current database exists and one or more preserved snapshots could not be decrypted or migrated. Refusing to initialize an empty database until the historical encryption key is restored.", { cause: legacyError });
   }
 
   state = empty();
