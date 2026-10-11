@@ -3,6 +3,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import path from "path";
 import router from "./routes";
+import healthRouter from "./routes/health";
 import mcpRouter from "./routes/mcp";
 import { logger } from "./lib/logger";
 
@@ -57,6 +58,10 @@ app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT 
 
 // MCP public protocol boundary. The API router remains under /api.
 app.use(mcpRouter);
+
+// Health endpoints must be available at the root before the SPA fallback.
+// Keep /api/healthz and /api/health aliases through the API router as well.
+app.use(healthRouter);
 
 // API routes — sempre têm prioridade sobre qualquer rota estática
 app.use("/api", router);
