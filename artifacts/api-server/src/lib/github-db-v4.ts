@@ -158,7 +158,7 @@ async function recoverQuarantinedSnapshot(keys: Buffer[]): Promise<RecoveryScan>
 
   const entries = await response.json() as Array<{ name?: string; path?: string; type?: string }>;
   const candidates = entries
-    .filter((entry) => entry.type === "file" && typeof entry.path === "string" && /^invalid-database-.*\\.txt$/.test(entry.name ?? ""))
+    .filter((entry) => entry.type === "file" && typeof entry.path === "string" && /^invalid-database-.*\.txt$/.test(entry.name ?? ""))
     .sort((a, b) => (b.name ?? "").localeCompare(a.name ?? ""));
 
   let unreadableCount = 0;
