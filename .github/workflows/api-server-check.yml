@@ -30,3 +30,15 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir artifacts/api-server run typecheck
+
+  production-smoke:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify live Universal Server health and durable persistence
+        env:
+          UNIVERSAL_SERVER_URL: https://universal-server-sfhr.onrender.com
+        run: |
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors "$UNIVERSAL_SERVER_URL/api/healthz" |
+            node -e 'let body=""; process.stdin.on("data", chunk => body += chunk); process.stdin.on("end", () => { const h = JSON.parse(body); if (h.status !== "ok" || h.database?.ok !== true || h.persistence?.dirty !== false || h.persistence?.lastPersistError) { console.error(JSON.stringify({status:h.status,databaseOk:h.database?.ok,dirty:h.persistence?.dirty,lastPersistError:Boolean(h.persistence?.lastPersistError)})); process.exit(1); } console.log(JSON.stringify({status:h.status,databaseOk:h.database.ok,dirty:h.persistence.dirty,lastPersistError:null})); });'
