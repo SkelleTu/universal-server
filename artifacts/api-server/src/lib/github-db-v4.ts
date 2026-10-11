@@ -202,11 +202,20 @@ async function writeSnapshot(snapshot: DatabaseSnapshot): Promise<void> {
 }
 
 async function quarantine(file: FileState): Promise<void> {
-  try {
-    const path = `recovery/invalid-database-${Date.now()}.txt`;
-    const encoded = path.split("/").map(encodeURIComponent).join("/");
-    await gh(`/repos/${cfg().repo}/contents/${encoded}`, { method: "PUT", body: JSON.stringify({ message: "chore(recovery): quarantine invalid database snapshot", content: Buffer.from(file.text, "utf8").toString("base64"), branch: "main" }) });
-  } catch (err) { logger.warn({ err }, "Unable to quarantine invalid GitHub database"); }
+  const path = `recovery/invalid-database-${Date.now()}.txt`;
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  const response = await gh(`/repos/${cfg().repo}/contents/${encoded}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      message: "chore(recovery): quarantine invalid database snapshot",
+      content: Buffer.from(file.text, "utf8").toString("base64"),
+      branch: "main",
+    }),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Failed to quarantine invalid GitHub database snapshot (HTTP ${response.status}). Refusing to continue recovery without a confirmed preserved copy. ${detail}`);
+  }
 }
 
 async function legacy(): Promise<DatabaseSnapshot | null> {
