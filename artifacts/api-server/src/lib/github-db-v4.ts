@@ -314,7 +314,7 @@ export async function initGitHubDatabase(): Promise<void> {
       }
       state = currentSnapshot;
       lastPersistAt = new Date().toISOString();
-      logger.info({ repository: c.repo, path: DB_PATH, format: current.text.trim().startsWith(`${TEXT_FORMAT}\\n`) ? TEXT_FORMAT : RAW_FORMAT }, "GitHub database loaded");
+      logger.info({ repository: c.repo, path: DB_PATH, format: current.text.trim().startsWith(`${TEXT_FORMAT}\n`) ? TEXT_FORMAT : RAW_FORMAT }, "GitHub database loaded");
       return;
     }
 
