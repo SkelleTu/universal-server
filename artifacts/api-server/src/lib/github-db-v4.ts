@@ -74,7 +74,7 @@ async function readFileBytes(path: string): Promise<{ bytes: Buffer; sha: string
   if (!p.content || !p.sha || (p.encoding && p.encoding !== "base64")) {
     throw new Error("GitHub binary response did not include base64 content and SHA");
   }
-  return { bytes: Buffer.from(p.content.replace(/\\n/g, ""), "base64"), sha: p.sha };
+  return { bytes: Buffer.from(p.content.replace(/\n/g, ""), "base64"), sha: p.sha };
 }
 
 function empty(): DatabaseSnapshot {
