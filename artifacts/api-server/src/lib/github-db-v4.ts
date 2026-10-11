@@ -240,7 +240,7 @@ async function legacy(): Promise<DatabaseSnapshot | null> {
 }
 
 function db(): DatabaseSnapshot { if (!state) throw new Error("GitHub database is not initialized"); return state; }
-async function persistNow() { if (!state) return; const snapshot = JSON.parse(JSON.stringify(state)) as DatabaseSnapshot; dirty = false; queue = queue.then(() => writeSnapshot(snapshot)).catch((err) => { dirty = true; lastPersistError = err instanceof Error ? err.message : String(err); logger.error({ err }, "GitHub database persistence failed"); }); await queue; }
+async function persistNow() { if (!state) return; const snapshot = JSON.parse(JSON.stringify(state)) as DatabaseSnapshot; dirty = false; queue = queue.catch(() => undefined).then(() => writeSnapshot(snapshot)).catch((err) => { dirty = true; lastPersistError = err instanceof Error ? err.message : String(err); logger.error({ err }, "GitHub database persistence failed"); throw err; }); await queue; }
 
 export async function initGitHubDatabase(): Promise<void> {
   if (state) return;
@@ -377,8 +377,8 @@ export function listGameCacheSince(projectId: number, namespace: string, since: 
 export function getStats() { const d = new Date().toISOString().slice(0, 10); return { requestsToday: db().request_logs.filter((r) => r.created_at.startsWith(d)).length, totalCollections: new Set(db().collections.map((r) => `${r.project_id}:${r.collection}`)).size, totalProjects: db().projects.length, totalGameCacheEntries: db().game_cache.length }; }
 export function databaseSnapshot(): DatabaseSnapshot { return JSON.parse(JSON.stringify(db())) as DatabaseSnapshot; }
 export async function restoreDatabase(snapshot: DatabaseSnapshot): Promise<void> { state = normalize(snapshot); dirty = true; await persistNow(); }
-export function databaseHasPersistentData(): boolean { return Boolean(state && (state.projects.length || state.collections.length || state.game_cache.length)); }
+export function databaseHasPersistentData(): boolean { return Boolean(state && (state.projects.length || state.collections.length || state.request_logs.length || state.game_cache.length)); }
 export function githubDatabaseHealth(): { ok: boolean; latencyMs: number } { return { ok: Boolean(state), latencyMs: 0 }; }
 export function githubPersistenceStatus() { return { primary: "github" as const, encrypted: true, dirty, lastPersistAt, lastPersistError }; }
-export function scheduleGitHubPersist(): void { dirty = true; if (timer) return; timer = setTimeout(() => { timer = null; void persistNow(); }, DEBOUNCE_MS); }
+export function scheduleGitHubPersist(): void { dirty = true; if (timer) return; timer = setTimeout(() => { timer = null; void persistNow().catch(() => undefined); }, DEBOUNCE_MS); }
 export async function flushGitHubDatabase(reason = "manual"): Promise<void> { if (timer) { clearTimeout(timer); timer = null; } logger.info({ reason }, "Flushing GitHub database"); await persistNow(); }
