@@ -4,10 +4,11 @@ import { pgGetDatabaseHealth, pgPersistenceStatus } from "../lib/pglite";
 const router: IRouter = Router();
 const startTime = Date.now();
 
-router.get("/healthz", async (_req, res): Promise<void> => {
+router.get(["/healthz", "/health"], async (_req, res): Promise<void> => {
   const github = await pgGetDatabaseHealth();
   const persistence = pgPersistenceStatus();
-  const healthy = github.ok;
+  // A live process with failed GitHub persistence is not healthy: writes must be durable.
+  const healthy = github.ok && !persistence.lastPersistError;
   res.status(healthy ? 200 : 503).json({
     status: healthy ? "ok" : "degraded",
     uptime: Math.floor((Date.now() - startTime) / 1000),
