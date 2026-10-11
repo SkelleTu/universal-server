@@ -340,9 +340,27 @@ export async function initGitHubDatabase(): Promise<void> {
       return;
     }
 
+    // A corrupted primary snapshot must not prevent recovery from the separately
+    // stored legacy manifest/chunks. Validate the legacy payload before writing
+    // anything; if validation fails, fail closed and preserve all source files.
+    let legacyRecovery: DatabaseSnapshot | null = null;
+    let legacyRecoveryError: unknown = null;
+    try {
+      legacyRecovery = await legacy();
+    } catch (err) {
+      legacyRecoveryError = err;
+      logger.error({ err }, "Unreadable current database; legacy backup validation failed");
+    }
+    if (legacyRecovery && snapshotHasData(legacyRecovery)) {
+      state = legacyRecovery;
+      dirty = true;
+      await persistNow();
+      logger.warn({ repository: c.repo, path: DB_PATH }, "Universal Server database recovered from populated legacy backup after primary snapshot failure");
+      return;
+    }
     throw new Error(
-      "Existing Universal Server database could not be decrypted and no non-empty quarantined snapshot could be recovered. The original snapshot was preserved; verify the historical encryption key before restarting.",
-      { cause: currentError },
+      "Existing Universal Server database could not be decrypted and no validated non-empty quarantined or legacy snapshot could be recovered. The original snapshot was preserved; verify the historical encryption key and backup files before restarting.",
+      { cause: legacyRecoveryError ?? currentError },
     );
   }
 
