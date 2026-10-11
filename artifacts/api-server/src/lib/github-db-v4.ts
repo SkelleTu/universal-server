@@ -112,7 +112,7 @@ function decryptWithKeys(raw: Buffer, keys: Buffer[]): DatabaseSnapshot {
 
 function decodeStored(text: string, keys: Buffer[]): DatabaseSnapshot {
   const trimmed = text.trim();
-  const raw = trimmed.startsWith(`${TEXT_FORMAT}\\n`)
+  const raw = trimmed.startsWith(`${TEXT_FORMAT}\n`)
     ? Buffer.from(trimmed.slice(TEXT_FORMAT.length + 1), "base64")
     : Buffer.from(trimmed, "base64");
   return decryptWithKeys(raw, keys);
