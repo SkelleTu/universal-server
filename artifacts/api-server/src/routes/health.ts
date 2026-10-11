@@ -4,7 +4,7 @@ import { pgGetDatabaseHealth, pgPersistenceStatus } from "../lib/pglite";
 const router: IRouter = Router();
 const startTime = Date.now();
 
-router.get("/healthz", async (_req, res): Promise<void> => {
+router.get(["/healthz", "/health"], async (_req, res): Promise<void> => {
   const github = await pgGetDatabaseHealth();
   const persistence = pgPersistenceStatus();
   const healthy = github.ok;
