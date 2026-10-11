@@ -241,8 +241,16 @@ async function legacy(): Promise<DatabaseSnapshot | null> {
       const part = await readFileBytes(`${LEGACY_PREFIX}${String(i).padStart(6, "0")}.bin`);
       if (!part) throw new Error(`Legacy chunk ${i} missing`);
       // GitHub's Contents API already base64-decodes the file bytes above.
-      // Legacy chunks are binary USBK1 payloads, not UTF-8 base64 text.
-      chunks.push(part.bytes);
+      // Accept both historical binary chunks and older base64-text chunks.
+      let chunk = part.bytes;
+      if (chunk.subarray(0, 5).toString() !== "USBK1") {
+        const textChunk = chunk.toString("utf8").trim();
+        if (/^[A-Za-z0-9+/]+={0,2}$/.test(textChunk)) {
+          const decoded = Buffer.from(textChunk, "base64");
+          if (decoded.subarray(0, 5).toString() === "USBK1") chunk = decoded;
+        }
+      }
+      chunks.push(chunk);
     }
     const raw = Buffer.concat(chunks);
     if (raw.subarray(0, 5).toString() !== "USBK1") throw new Error("Invalid legacy Universal Server backup format");
