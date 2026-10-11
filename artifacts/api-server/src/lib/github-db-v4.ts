@@ -110,6 +110,24 @@ function decryptWithKeys(raw: Buffer, keys: Buffer[]): DatabaseSnapshot {
   throw new Error(`Unable to decrypt Universal Server backup with any configured key. Verify ${KEY_ENV}/${LEGACY_KEY_ENV}. Detail: ${detail}`);
 }
 
+function decryptLegacyWithKeys(raw: Buffer, keys: Buffer[]): DatabaseSnapshot {
+  let lastError: unknown;
+  for (const key of keys) {
+    try {
+      if (raw.subarray(0, 5).toString() !== "USBK1") throw new Error("Invalid legacy Universal Server backup format");
+      if (raw.length < 33) throw new Error("Legacy Universal Server backup is truncated");
+      const decipher = crypto.createDecipheriv("aes-256-gcm", key, raw.subarray(5, 17));
+      decipher.setAuthTag(raw.subarray(17, 33));
+      const compressed = Buffer.concat([decipher.update(raw.subarray(33)), decipher.final()]);
+      return normalize(JSON.parse(gunzipSync(compressed).toString("utf8")) as Partial<DatabaseSnapshot>);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  const detail = lastError instanceof Error ? lastError.message : String(lastError ?? "unknown decryption error");
+  throw new Error(`Unable to decrypt legacy Universal Server backup with any configured key. Verify ${KEY_ENV}/${LEGACY_KEY_ENV}. Detail: ${detail}`);
+}
+
 function decodeStored(text: string, keys: Buffer[]): DatabaseSnapshot {
   const trimmed = text.trim();
   const raw = trimmed.startsWith(`${TEXT_FORMAT}\n`)
@@ -162,7 +180,7 @@ async function legacy(): Promise<DatabaseSnapshot | null> {
     }
     const raw = Buffer.concat(chunks);
     if (raw.subarray(0, 5).toString() !== "USBK1") throw new Error("Invalid legacy Universal Server backup format");
-    return decryptWithKeys(raw, cfg().keys);
+    return decryptLegacyWithKeys(raw, cfg().keys);
   } catch (err) {
     logger.error({ err }, "Legacy backup could not be migrated; refusing to initialize an empty database");
     throw new Error("Legacy Universal Server backup exists but could not be decrypted or migrated. Verify the configured encryption key and backup files.", { cause: err });
