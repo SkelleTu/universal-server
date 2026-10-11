@@ -35,13 +35,17 @@ let lastPersistError: string | null = null;
 function cfg() {
   const token = process.env.BACKUP_GITHUB_TOKEN?.trim();
   const repo = process.env.BACKUP_GITHUB_REPO?.trim();
-  const enc = process.env[KEY_ENV]?.trim() ?? process.env[LEGACY_KEY_ENV]?.trim();
   if (!token) throw new Error("BACKUP_GITHUB_TOKEN environment variable is required.");
   if (!repo) throw new Error("BACKUP_GITHUB_REPO environment variable is required.");
-  if (!enc) throw new Error(`${KEY_ENV} or ${LEGACY_KEY_ENV} environment variable is required.`);
-  const key = Buffer.from(enc, "base64");
-  if (key.length !== 32) throw new Error(`${KEY_ENV} or ${LEGACY_KEY_ENV} must be base64-encoded 32 bytes`);
-  return { token, repo, key };
+  const encodings = [process.env[KEY_ENV]?.trim(), process.env[LEGACY_KEY_ENV]?.trim()]
+    .filter((value): value is string => Boolean(value));
+  if (encodings.length === 0) throw new Error(`${KEY_ENV} or ${LEGACY_KEY_ENV} environment variable is required.`);
+  const keys = encodings.map((encoded) => {
+    const key = Buffer.from(encoded, "base64");
+    if (key.length !== 32) throw new Error(`${KEY_ENV} or ${LEGACY_KEY_ENV} must be base64-encoded 32 bytes`);
+    return key;
+  });
+  return { token, repo, key: keys[0]!, keys };
 }
 
 async function gh(path: string, init: RequestInit = {}) {
@@ -93,10 +97,25 @@ function decrypt(raw: Buffer, key: Buffer): DatabaseSnapshot {
   return normalize(JSON.parse(gunzipSync(gz).toString("utf8")) as Partial<DatabaseSnapshot>);
 }
 
-function decodeStored(text: string, key: Buffer): DatabaseSnapshot {
+function decryptWithKeys(raw: Buffer, keys: Buffer[]): DatabaseSnapshot {
+  let lastError: unknown;
+  for (const key of keys) {
+    try {
+      return decrypt(raw, key);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  const detail = lastError instanceof Error ? lastError.message : String(lastError ?? "unknown decryption error");
+  throw new Error(`Unable to decrypt Universal Server backup with any configured key. Verify ${KEY_ENV}/${LEGACY_KEY_ENV}. Detail: ${detail}`);
+}
+
+function decodeStored(text: string, keys: Buffer[]): DatabaseSnapshot {
   const trimmed = text.trim();
-  if (trimmed.startsWith(`${TEXT_FORMAT}\n`)) return decrypt(Buffer.from(trimmed.slice(TEXT_FORMAT.length + 1), "base64"), key);
-  return decrypt(Buffer.from(trimmed, "base64"), key);
+  const raw = trimmed.startsWith(`${TEXT_FORMAT}\\n`)
+    ? Buffer.from(trimmed.slice(TEXT_FORMAT.length + 1), "base64")
+    : Buffer.from(trimmed, "base64");
+  return decryptWithKeys(raw, keys);
 }
 
 function encodeStored(snapshot: DatabaseSnapshot, key: Buffer): string {
@@ -134,19 +153,20 @@ async function legacy(): Promise<DatabaseSnapshot | null> {
   if (!manifest) return null;
   try {
     const count = Number((JSON.parse(manifest.text) as { chunkCount?: number }).chunkCount ?? 0);
-    if (!Number.isInteger(count) || count < 1) return null;
+    if (!Number.isInteger(count) || count < 1) throw new Error("Legacy backup manifest has an invalid chunkCount");
     const chunks: Buffer[] = [];
     for (let i = 0; i < count; i++) {
       const part = await readFile(`${LEGACY_PREFIX}${String(i).padStart(6, "0")}.bin`);
       if (!part) throw new Error(`Legacy chunk ${i} missing`);
       chunks.push(Buffer.from(part.text.trim(), "base64"));
     }
-    const raw = Buffer.concat(chunks), key = cfg().key;
+    const raw = Buffer.concat(chunks);
     if (raw.subarray(0, 5).toString() !== "USBK1") throw new Error("Invalid legacy Universal Server backup format");
-    const d = crypto.createDecipheriv("aes-256-gcm", key, raw.subarray(5, 17)); d.setAuthTag(raw.subarray(17, 33));
-    const gz = Buffer.concat([d.update(raw.subarray(33)), d.final()]);
-    return normalize(JSON.parse(gunzipSync(gz).toString("utf8")) as Partial<DatabaseSnapshot>);
-  } catch (err) { logger.warn({ err }, "Legacy backup could not be migrated; using a new database"); return null; }
+    return decryptWithKeys(raw, cfg().keys);
+  } catch (err) {
+    logger.error({ err }, "Legacy backup could not be migrated; refusing to initialize an empty database");
+    throw new Error("Legacy Universal Server backup exists but could not be decrypted or migrated. Verify the configured encryption key and backup files.", { cause: err });
+  }
 }
 
 function db(): DatabaseSnapshot { if (!state) throw new Error("GitHub database is not initialized"); return state; }
@@ -159,13 +179,14 @@ export async function initGitHubDatabase(): Promise<void> {
   if (current) {
     sha = current.sha;
     try {
-      state = decodeStored(current.text, c.key);
+      state = decodeStored(current.text, c.keys);
       lastPersistAt = new Date().toISOString();
       logger.info({ repository: c.repo, path: DB_PATH, format: current.text.trim().startsWith(`${TEXT_FORMAT}\n`) ? TEXT_FORMAT : RAW_FORMAT }, "GitHub database loaded");
       return;
     } catch (err) {
-      logger.warn({ err }, "Existing GitHub database is invalid; preserving it and rebuilding");
+      logger.error({ err }, "Existing GitHub database cannot be decrypted; preserving the original and refusing to rebuild");
       await quarantine(current);
+      throw new Error("Existing Universal Server database could not be decrypted. The original snapshot was preserved; verify the configured encryption key before restarting.", { cause: err });
     }
   }
   state = (await legacy()) ?? empty();
