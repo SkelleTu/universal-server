@@ -65,6 +65,18 @@ async function readFile(path: string): Promise<FileState | null> {
   return { text: Buffer.from(p.content.replace(/\n/g, ""), "base64").toString("utf8"), sha: p.sha };
 }
 
+async function readFileBytes(path: string): Promise<{ bytes: Buffer; sha: string } | null> {
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  const r = await gh(`/repos/${cfg().repo}/contents/${encoded}?ref=main`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`GitHub binary read failed (${r.status}): ${await r.text()}`);
+  const p = await r.json() as { content?: string; sha?: string; encoding?: string };
+  if (!p.content || !p.sha || (p.encoding && p.encoding !== "base64")) {
+    throw new Error("GitHub binary response did not include base64 content and SHA");
+  }
+  return { bytes: Buffer.from(p.content.replace(/\\n/g, ""), "base64"), sha: p.sha };
+}
+
 function empty(): DatabaseSnapshot {
   return { schemaVersion: 1, createdAt: new Date().toISOString(), projects: [], collections: [], request_logs: [], game_cache: [], nextIds: { projects: 1, collections: 1, request_logs: 1, game_cache: 1 } };
 }
@@ -226,9 +238,11 @@ async function legacy(): Promise<DatabaseSnapshot | null> {
     if (!Number.isInteger(count) || count < 1) throw new Error("Legacy backup manifest has an invalid chunkCount");
     const chunks: Buffer[] = [];
     for (let i = 0; i < count; i++) {
-      const part = await readFile(`${LEGACY_PREFIX}${String(i).padStart(6, "0")}.bin`);
+      const part = await readFileBytes(`${LEGACY_PREFIX}${String(i).padStart(6, "0")}.bin`);
       if (!part) throw new Error(`Legacy chunk ${i} missing`);
-      chunks.push(Buffer.from(part.text.trim(), "base64"));
+      // GitHub's Contents API already base64-decodes the file bytes above.
+      // Legacy chunks are binary USBK1 payloads, not UTF-8 base64 text.
+      chunks.push(part.bytes);
     }
     const raw = Buffer.concat(chunks);
     if (raw.subarray(0, 5).toString() !== "USBK1") throw new Error("Invalid legacy Universal Server backup format");
