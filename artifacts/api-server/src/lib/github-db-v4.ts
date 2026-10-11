@@ -136,6 +136,49 @@ function decodeStored(text: string, keys: Buffer[]): DatabaseSnapshot {
   return decryptWithKeys(raw, keys);
 }
 
+function snapshotHasData(snapshot: DatabaseSnapshot): boolean {
+  return snapshot.projects.length > 0 ||
+    snapshot.collections.length > 0 ||
+    snapshot.request_logs.length > 0 ||
+    snapshot.game_cache.length > 0;
+}
+
+type RecoveryScan = {
+  snapshot: DatabaseSnapshot | null;
+  path: string | null;
+  candidateCount: number;
+  unreadableCount: number;
+};
+
+async function recoverQuarantinedSnapshot(keys: Buffer[]): Promise<RecoveryScan> {
+  const { repo } = cfg();
+  const response = await gh(`/repos/${repo}/contents/recovery?ref=main`);
+  if (response.status === 404) return { snapshot: null, path: null, candidateCount: 0, unreadableCount: 0 };
+  if (!response.ok) throw new Error(`GitHub recovery listing failed (${response.status})`);
+
+  const entries = await response.json() as Array<{ name?: string; path?: string; type?: string }>;
+  const candidates = entries
+    .filter((entry) => entry.type === "file" && typeof entry.path === "string" && /^invalid-database-.*\\.txt$/.test(entry.name ?? ""))
+    .sort((a, b) => (b.name ?? "").localeCompare(a.name ?? ""));
+
+  let unreadableCount = 0;
+  for (const entry of candidates) {
+    if (!entry.path) continue;
+    const file = await readFile(entry.path);
+    if (!file) continue;
+    try {
+      const snapshot = decodeStored(file.text, keys);
+      if (snapshotHasData(snapshot)) {
+        logger.warn({ path: entry.path }, "Recovered non-empty Universal Server snapshot from quarantine");
+        return { snapshot, path: entry.path, candidateCount: candidates.length, unreadableCount };
+      }
+    } catch {
+      unreadableCount += 1;
+    }
+  }
+  return { snapshot: null, path: null, candidateCount: candidates.length, unreadableCount };
+}
+
 function encodeStored(snapshot: DatabaseSnapshot, key: Buffer): string {
   return `${TEXT_FORMAT}\n${encrypt(snapshot, key).toString("base64")}\n`;
 }
@@ -196,18 +239,76 @@ export async function initGitHubDatabase(): Promise<void> {
   const current = await readFile(DB_PATH);
   if (current) {
     sha = current.sha;
+    let currentSnapshot: DatabaseSnapshot | null = null;
+    let currentError: unknown = null;
     try {
-      state = decodeStored(current.text, c.keys);
+      currentSnapshot = decodeStored(current.text, c.keys);
+    } catch (err) {
+      currentError = err;
+      logger.error({ err }, "Existing GitHub database cannot be decrypted; checking preserved recovery snapshots");
+      await quarantine(current);
+    }
+
+    const recovery = await recoverQuarantinedSnapshot(c.keys);
+    if (recovery.snapshot) {
+      // Preserve the current file before replacing it with recovered state.
+      if (currentSnapshot && snapshotHasData(currentSnapshot)) {
+        state = currentSnapshot;
+        lastPersistAt = new Date().toISOString();
+        return;
+      }
+      state = recovery.snapshot;
+      dirty = true;
+      await persistNow();
+      logger.warn({
+        repository: c.repo,
+        recoveredFrom: recovery.path,
+        recoveryCandidates: recovery.candidateCount,
+        unreadableCandidates: recovery.unreadableCount,
+      }, "Universal Server database recovered from a preserved encrypted snapshot");
+      return;
+    }
+
+    if (currentSnapshot) {
+      if (!snapshotHasData(currentSnapshot) && recovery.unreadableCount > 0) {
+        throw new Error(
+          "Current Universal Server database is empty while quarantined snapshots remain unreadable. Refusing to continue until the historical encryption key is restored.",
+        );
+      }
+      state = currentSnapshot;
       lastPersistAt = new Date().toISOString();
       logger.info({ repository: c.repo, path: DB_PATH, format: current.text.trim().startsWith(`${TEXT_FORMAT}\n`) ? TEXT_FORMAT : RAW_FORMAT }, "GitHub database loaded");
       return;
-    } catch (err) {
-      logger.error({ err }, "Existing GitHub database cannot be decrypted; preserving the original and refusing to rebuild");
-      await quarantine(current);
-      throw new Error("Existing Universal Server database could not be decrypted. The original snapshot was preserved; verify the configured encryption key before restarting.", { cause: err });
     }
+
+    throw new Error(
+      "Existing Universal Server database could not be decrypted and no non-empty quarantined snapshot could be recovered. The original snapshot was preserved; verify the historical encryption key before restarting.",
+      { cause: currentError },
+    );
   }
-  state = (await legacy()) ?? empty();
+
+  const legacySnapshot = await legacy();
+  if (legacySnapshot) {
+    state = legacySnapshot;
+    dirty = true;
+    await persistNow();
+    logger.info({ repository: c.repo, path: DB_PATH, migrated: true }, "Legacy Universal Server database migrated");
+    return;
+  }
+
+  const recovery = await recoverQuarantinedSnapshot(c.keys);
+  if (recovery.snapshot) {
+    state = recovery.snapshot;
+    dirty = true;
+    await persistNow();
+    logger.warn({ repository: c.repo, recoveredFrom: recovery.path }, "Universal Server database recovered from quarantine");
+    return;
+  }
+  if (recovery.unreadableCount > 0) {
+    throw new Error("No current database exists but quarantined snapshots cannot be decrypted. Refusing to initialize an empty database until the historical encryption key is restored.");
+  }
+
+  state = empty();
   dirty = true;
   await persistNow();
   logger.info({ repository: c.repo, path: DB_PATH, rebuilt: true }, "GitHub database initialized");
