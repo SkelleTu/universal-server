@@ -25,8 +25,10 @@ const TTL_MS = 60_000;
 function serviceAuthorized(req: import("express").Request): boolean {
   const expected = process.env.INVISTA_UNIVERSAL_SERVER_KEY;
   const supplied = req.header("x-invista-server-key") || "";
-  return Boolean(expected && supplied && supplied.length === expected.length &&
-    crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected)));
+  const expectedBytes = Buffer.from(expected || "", "utf8");
+  const suppliedBytes = Buffer.from(supplied, "utf8");
+  return Boolean(expected && supplied && suppliedBytes.length === expectedBytes.length &&
+    crypto.timingSafeEqual(suppliedBytes, expectedBytes));
 }
 
 function digest(ticket: string): string {
