@@ -5,6 +5,7 @@ import path from "path";
 import router from "./routes";
 import healthRouter from "./routes/health";
 import mcpRouter from "./routes/mcp";
+import invistaRemoteAccessRouter from "./routes/invista-remote-access";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
@@ -19,6 +20,7 @@ app.use(
         return {
           id: req.id,
           method: req.method,
+          // Do not log query strings: one-time SSO grants must never appear in logs.
           url: req.url?.split("?")[0],
         };
       },
@@ -62,6 +64,9 @@ app.use(mcpRouter);
 // Health endpoints must be available at the root before the SPA fallback.
 // Keep /api/healthz and /api/health aliases through the API router as well.
 app.use(healthRouter);
+
+// Short-lived, server-to-server browser SSO grants. Must be mounted before the SPA.
+app.use("/api", invistaRemoteAccessRouter);
 
 // API routes — sempre têm prioridade sobre qualquer rota estática
 app.use("/api", router);
