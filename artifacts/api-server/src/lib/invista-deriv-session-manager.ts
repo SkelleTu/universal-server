@@ -150,6 +150,7 @@ export async function heartbeatDerivSession(userId: string, platform: Platform) 
   return { configured: true, active: true, connected: Boolean(session && session.socket.readyState === WebSocket.OPEN) };
 }
 
+// Fail closed when the authenticated platform stops heartbeating.
 async function reapStaleDerivSessions(): Promise<void> {
   const project = await pgGetOrCreateSystemProject();
   const rows = await pgListGameCache(project.id, namespace, 200);
