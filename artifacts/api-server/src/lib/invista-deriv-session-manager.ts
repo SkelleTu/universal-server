@@ -150,7 +150,7 @@ export async function heartbeatDerivSession(userId: string, platform: Platform) 
   return { configured: true, active: true, connected: Boolean(session && session.socket.readyState === WebSocket.OPEN) };
 }
 
-async function reapStaleDerivSessions(): Promise<void> {
+// Fail closed on stale platform presence: a saved token does not imply an active session.\nasync function reapStaleDerivSessions(): Promise<void> {
   const project = await pgGetOrCreateSystemProject();
   const rows = await pgListGameCache(project.id, namespace, 200);
   const cutoff = Date.now() - 120_000;
