@@ -140,17 +140,23 @@ router.post("/invista/browser-access/redeem", async (req: Request, res: Response
     const userId = String(stored.data.userId ?? "");
     const platform = String(stored.data.platform ?? "");
     const sessionId = String(stored.data.sessionId ?? "");
-    if (!userId || !["main", "aura"].includes(platform) || !sessionId) {
+    const userEmail = String(stored.data.userEmail ?? "").trim().toLowerCase();
+    if (!userId || !["main", "aura"].includes(platform) || !sessionId || !userEmail.includes("@")) {
       res.status(401).json({ ok: false, error: "invalid_grant_payload" });
       return;
     }
     const activeSession = invistaSessionManager.getActive(userId, platform as TradingMode);
-    if (!activeSession || activeSession.sessionId !== sessionId) {
+    if (!activeSession || activeSession.sessionId !== sessionId || activeSession.userEmail !== userEmail) {
       res.status(401).json({ ok: false, error: "source_platform_session_inactive" });
       return;
     }
+    const delegation = await pgGetGameCache(project.id, COLLECTION, `delegation:${platform}:${userEmail}`);
+    if (delegation?.data?.enabled !== true || delegation.data.userId !== userId) {
+      res.status(401).json({ ok: false, error: "browser_delegation_revoked" });
+      return;
+    }
     res.setHeader("Cache-Control", "no-store, max-age=0");
-    res.json({ ok: true, userId, platform, sessionId, redeemedAt: new Date().toISOString() });
+    res.json({ ok: true, userId, userEmail, platform, sessionId, redeemedAt: new Date().toISOString() });
   } finally {
     redeeming.delete(key);
   }
