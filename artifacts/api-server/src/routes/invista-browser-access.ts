@@ -79,14 +79,21 @@ router.post("/invista/browser-access/grants", async (req: Request, res: Response
   if (!userId || !["main", "aura"].includes(platform)) { res.status(400).json({ ok: false, error: "userId and platform are required" }); return; }
   if (!consent) { res.status(403).json({ ok: false, error: "explicit_user_consent_required" }); return; }
   const activeSession = invistaSessionManager.getActive(userId, platform as TradingMode);
-  if (!activeSession) {
-    res.status(409).json({ ok: false, error: "source_platform_session_not_active" });
+  if (!activeSession || !activeSession.userEmail || !activeSession.userEmail.includes("@")) {
+    res.status(409).json({ ok: false, error: "source_platform_session_with_verified_email_required" });
     return;
   }
   const grant = crypto.randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + GRANT_TTL_MS).toISOString();
   const project = await pgGetOrCreateSystemProject();
-  await pgUpsertGameCache(project.id, COLLECTION, hashGrant(grant), { userId, platform, sessionId: activeSession.sessionId, createdAt: new Date().toISOString() }, expiresAt);
+  await pgUpsertGameCache(project.id, COLLECTION, hashGrant(grant), {
+    userId,
+    userEmail: activeSession.userEmail.trim().toLowerCase(),
+    platform,
+    sessionId: activeSession.sessionId,
+    delegationRequired: false,
+    createdAt: new Date().toISOString(),
+  }, expiresAt);
   let launchUrl: string;
   try { launchUrl = `${platformOrigin(platform)}/api/auth/universal-exchange?grant=${encodeURIComponent(grant)}`; }
   catch { await pgDeleteGameCache(project.id, COLLECTION, hashGrant(grant)); res.status(503).json({ ok: false, error: "platform_origin_not_configured" }); return; }
@@ -153,10 +160,15 @@ router.post("/invista/browser-access/redeem", async (req: Request, res: Response
       res.status(401).json({ ok: false, error: "source_platform_session_inactive" });
       return;
     }
-    const delegation = await pgGetGameCache(project.id, COLLECTION, `delegation:${platform}:${userEmail}`);
-    if (delegation?.data?.enabled !== true || delegation.data.userId !== userId) {
-      res.status(401).json({ ok: false, error: "browser_delegation_revoked" });
-      return;
+    // Persistent MCP launches require an enabled delegation. A one-time grant
+    // minted by the explicitly consented /grants endpoint is separately scoped
+    // to that source session and does not imply persistent delegation.
+    if (stored.data.delegationRequired !== false) {
+      const delegation = await pgGetGameCache(project.id, COLLECTION, `delegation:${platform}:${userEmail}`);
+      if (delegation?.data?.enabled !== true || delegation.data.userId !== userId) {
+        res.status(401).json({ ok: false, error: "browser_delegation_revoked" });
+        return;
+      }
     }
     res.setHeader("Cache-Control", "no-store, max-age=0");
     res.json({ ok: true, userId, userEmail, platform, sessionId, redeemedAt: new Date().toISOString() });
