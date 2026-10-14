@@ -42,7 +42,7 @@ router.delete("/invista/deriv/session/:platform/:userId", async (req: Request, r
   const platform = String(req.params.platform ?? "");
   const userId = String(req.params.userId ?? "").trim();
   if (!validPlatform(platform) || !userId) { res.status(400).json({ ok: false, error: "platform and userId are required" }); return; }
-  try { res.json({ ok: true, ...(await disconnectAndDeleteDerivSession(userId, platform)) }); }
+  try { res.json(await disconnectAndDeleteDerivSession(userId, platform)); }
   catch { res.status(500).json({ ok: false, error: "session_delete_failed" }); }
 });
 
