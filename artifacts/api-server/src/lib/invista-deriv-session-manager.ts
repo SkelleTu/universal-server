@@ -15,7 +15,7 @@ const namespace = "invista-deriv-token";
 
 function storageKey(userId: string, platform: Platform): string { return `${platform}:${userId}`; }
 function encryptionKey(): Buffer {
-  const raw = String(process.env.UNIVERSAL_OPERATOR_ENCRYPTION_KEY ?? process.env.UNIVERSAL_SERVER_BACKUP_ENCRYPTION_KEY ?? "").trim();
+  const raw = String(process.env.INVISTA_DERIV_TOKEN_ENCRYPTION_KEY ?? process.env.UNIVERSAL_OPERATOR_ENCRYPTION_KEY ?? process.env.UNIVERSAL_SERVER_BACKUP_ENCRYPTION_KEY ?? "").trim();
   if (!raw) throw new Error("UNIVERSAL_OPERATOR_ENCRYPTION_KEY or UNIVERSAL_SERVER_BACKUP_ENCRYPTION_KEY is required for Deriv token vault.");
   return crypto.createHash("sha256").update(raw).digest();
 }
