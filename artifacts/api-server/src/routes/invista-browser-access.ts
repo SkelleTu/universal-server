@@ -5,6 +5,7 @@ import { pgDeleteGameCache, pgGetGameCache, pgGetOrCreateSystemProject, pgUpsert
 const router = Router();
 const COLLECTION = "invista-browser-access";
 const GRANT_TTL_MS = 120_000;
+const redeeming = new Set<string>();
 
 function serviceAuthorized(req: Request): boolean {
   const expected = String(process.env.INVISTA_UNIVERSAL_SERVER_KEY ?? "").trim();
@@ -47,15 +48,23 @@ router.post("/invista/browser-access/redeem", async (req: Request, res: Response
   if (!serviceAuthorized(req)) { res.status(401).json({ ok: false, error: "unauthorized" }); return; }
   const grant = String(req.body?.grant ?? "").trim();
   if (grant.length < 32 || grant.length > 256) { res.status(400).json({ ok: false, error: "invalid_grant" }); return; }
-  const project = await pgGetOrCreateSystemProject();
   const key = hashGrant(grant);
-  const stored = await pgGetGameCache(project.id, COLLECTION, key);
-  if (!stored) { res.status(401).json({ ok: false, error: "grant_expired_or_used" }); return; }
-  await pgDeleteGameCache(project.id, COLLECTION, key);
-  const userId = String(stored.data.userId ?? "");
-  const platform = String(stored.data.platform ?? "");
-  if (!userId || !["main", "aura"].includes(platform)) { res.status(401).json({ ok: false, error: "invalid_grant_payload" }); return; }
-  res.json({ ok: true, userId, platform, redeemedAt: new Date().toISOString() });
+  if (redeeming.has(key)) { res.status(401).json({ ok: false, error: "grant_expired_or_used" }); return; }
+  redeeming.add(key);
+  try {
+    const project = await pgGetOrCreateSystemProject();
+    const stored = await pgGetGameCache(project.id, COLLECTION, key);
+    if (!stored) { res.status(401).json({ ok: false, error: "grant_expired_or_used" }); return; }
+    // Consume before revealing identity. The in-process lock closes the concurrent
+    // double-redemption window for this single active service instance.
+    await pgDeleteGameCache(project.id, COLLECTION, key);
+    const userId = String(stored.data.userId ?? "");
+    const platform = String(stored.data.platform ?? "");
+    if (!userId || !["main", "aura"].includes(platform)) { res.status(401).json({ ok: false, error: "invalid_grant_payload" }); return; }
+    res.json({ ok: true, userId, platform, redeemedAt: new Date().toISOString() });
+  } finally {
+    redeeming.delete(key);
+  }
 });
 
 export default router;
