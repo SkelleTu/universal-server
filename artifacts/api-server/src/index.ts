@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { initPGlite, pgFlushPersistence } from "./lib/pglite";
 import { reconnectSavedDerivSessions, startDerivSessionReaper } from "./lib/invista-deriv-session-manager";
+import { invistaSessionManager } from "./lib/invista-session-manager";
 
 const rawPort = process.env["PORT"];
 if (!rawPort) throw new Error("PORT environment variable is required but was not provided.");
@@ -11,6 +12,7 @@ if (Number.isNaN(port) || port <= 0) throw new Error(`Invalid PORT value: "${raw
 (async () => {
   try {
     await initPGlite();
+    await invistaSessionManager.initialize();
     const server = app.listen(port, "0.0.0.0", () => {
       logger.info(
         { host: "0.0.0.0", port, database: "github", persistentDatabase: true },
