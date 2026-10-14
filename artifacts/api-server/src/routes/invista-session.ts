@@ -48,7 +48,7 @@ router.post("/invista/session/disconnect", (req, res): void => {
   res.json({ ok });
 });
 
-router.get("/invista/session/remote-status", (req, res): void => {
+router.get("/invista/session/remote-status", async (req, res): Promise<void> => {
   if (!serviceKeyOk(req)) { res.status(401).json({ ok: false, error: "unauthorized" }); return; }
   const sessionId = String(req.query.sessionId ?? "");
   const userId = String(req.query.userId ?? "");
@@ -59,8 +59,14 @@ router.get("/invista/session/remote-status", (req, res): void => {
   }
   const active = invistaSessionManager.getActive(userId, platform as TradingMode);
   const matches = Boolean(active && active.sessionId === sessionId);
+  let delegationEnabled = false;
+  if (matches && active?.userEmail) {
+    const project = await pgGetOrCreateSystemProject();
+    const delegation = await pgGetGameCache(project.id, "invista-browser-access", `delegation:${platform}:${active.userEmail}`);
+    delegationEnabled = delegation?.data?.enabled === true && delegation.data.userId === userId;
+  }
   res.setHeader("Cache-Control", "no-store, max-age=0");
-  res.json({ ok: true, active: matches, checkedAt: new Date().toISOString() });
+  res.json({ ok: true, active: matches && delegationEnabled, delegationEnabled, checkedAt: new Date().toISOString() });
 });
 
 router.get("/invista/sessions", (req, res): void => {
