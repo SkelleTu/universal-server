@@ -79,6 +79,16 @@ class InvistaSessionManager {
     return session && session.userId === userId ? session : null;
   }
 
+  getActive(userId: string, platform: TradingMode): InvistaSession | null {
+    const now = Date.now();
+    const session = [...this.sessions.values()].find(
+      item => item.userId === userId && item.platform === platform
+        && item.status !== "disconnected"
+        && now - Date.parse(item.lastHeartbeatAt) <= this.ttlMs,
+    );
+    return session ?? null;
+  }
+
   list() {
     return [...this.sessions.values()].map(s => ({
       ...s,
