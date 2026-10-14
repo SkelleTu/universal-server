@@ -44,6 +44,29 @@ function closeLive(key: string): void {
   live.delete(key);
   try { session.socket.close(1000, "session replaced or revoked"); } catch {}
 }
+function scheduleReconnect(userId: string, platform: Platform): void {
+  const key = storageKey(userId, platform);
+  const previous = reconnectTimers.get(key);
+  if (previous) clearTimeout(previous);
+  const attempt = Math.min((reconnectAttempts.get(key) ?? 0) + 1, 8);
+  reconnectAttempts.set(key, attempt);
+  const delayMs = Math.min(1000 * (2 ** (attempt - 1)), 60_000);
+  const timer = setTimeout(async () => {
+    reconnectTimers.delete(key);
+    try {
+      const saved = await credential(userId, platform);
+      if (!saved) { reconnectAttempts.delete(key); return; }
+      await connectCredential(saved);
+      reconnectAttempts.delete(key);
+    } catch (error) {
+      console.warn("[DERIV_SESSION] Reconnect attempt failed:", userId, platform, error instanceof Error ? error.message : String(error));
+      scheduleReconnect(userId, platform);
+    }
+  }, delayMs);
+  timer.unref?.();
+  reconnectTimers.set(key, timer);
+}
+
 async function connectCredential(record: StoredCredential): Promise<{ connected: boolean; accountId: string; accountType: DerivAccountType }> {
   const key = storageKey(record.userId, record.platform);
   if (connecting.has(key)) throw new Error("Deriv session connection is already in progress.");
@@ -64,24 +87,7 @@ async function connectCredential(record: StoredCredential): Promise<{ connected:
       if (session.heartbeat) clearInterval(session.heartbeat);
       if (live.get(key) === session) live.delete(key);
       if (session.intentionalClose) return;
-      const previous = reconnectTimers.get(key);
-      if (previous) clearTimeout(previous);
-      const attempt = Math.min((reconnectAttempts.get(key) ?? 0) + 1, 8);
-      reconnectAttempts.set(key, attempt);
-      const delayMs = Math.min(1000 * (2 ** (attempt - 1)), 60_000);
-      const timer = setTimeout(async () => {
-        reconnectTimers.delete(key);
-        try {
-          const saved = await credential(session.userId, session.platform);
-          if (!saved) { reconnectAttempts.delete(key); return; }
-          await connectCredential(saved);
-          reconnectAttempts.delete(key);
-        } catch (error) {
-          console.warn("[DERIV_SESSION] Reconnect attempt failed:", session.userId, session.platform, error instanceof Error ? error.message : String(error));
-        }
-      }, delayMs);
-      timer.unref?.();
-      reconnectTimers.set(key, timer);
+      scheduleReconnect(session.userId, session.platform);
     });
     session.heartbeat = setInterval(() => {
       if (socket.readyState === WebSocket.OPEN) {
@@ -107,6 +113,7 @@ export async function saveAndConnectDerivSession(input: { userId: string; platfo
   } catch (error) {
     // Keep the encrypted credential for controlled retry after a transient outage,
     // but never report the session as connected unless WebSocket open succeeded.
+    scheduleReconnect(input.userId, input.platform);
     throw error;
   }
 }
@@ -118,7 +125,7 @@ export async function reconnectSavedDerivSessions(): Promise<void> {
     const record = row.data as unknown as StoredCredential;
     if (!record?.userId || !["main", "aura"].includes(record.platform) || !["demo", "real"].includes(record.accountType) || !record.encryptedToken) continue;
     try { await connectCredential(record); }
-    catch (error) { console.warn("[DERIV_SESSION] Reconnect failed for user/platform:", record.userId, record.platform, error instanceof Error ? error.message : String(error)); }
+    catch (error) { console.warn("[DERIV_SESSION] Reconnect failed for user/platform:", record.userId, record.platform, error instanceof Error ? error.message : String(error)); scheduleReconnect(record.userId, record.platform); }
   }
 }
 
