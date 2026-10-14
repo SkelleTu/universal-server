@@ -5,7 +5,7 @@ import {
 import { createDerivAccountContext, type DerivAccountType } from "./deriv-account-gateway";
 
 type Platform = "main" | "aura";
-type StoredCredential = { userId: string; platform: Platform; accountType: DerivAccountType; accountId?: string; encryptedToken: string; active: boolean; updatedAt: string };
+type StoredCredential = { userId: string; platform: Platform; accountType: DerivAccountType; accountId?: string; encryptedToken: string; active: boolean; lastHeartbeatAt: string; updatedAt: string };
 type LiveSession = { key: string; userId: string; platform: Platform; accountType: DerivAccountType; accountId: string; socket: WebSocket; connectedAt: string; lastMessageAt: string; heartbeat?: ReturnType<typeof setInterval>; intentionalClose?: boolean };
 const live = new Map<string, LiveSession>();
 const connecting = new Set<string>();
@@ -104,7 +104,7 @@ export async function saveAndConnectDerivSession(input: { userId: string; platfo
   const userId = String(input.userId ?? "").trim();
   const token = String(input.token ?? "").trim();
   if (!userId || !token || !["main", "aura"].includes(input.platform) || !["demo", "real"].includes(input.accountType)) throw new Error("userId, token, platform and accountType are required.");
-  const record: StoredCredential = { userId, platform: input.platform, accountType: input.accountType, accountId: input.accountId?.trim() || undefined, encryptedToken: encrypt(token), active: true, updatedAt: new Date().toISOString() };
+  const record: StoredCredential = { userId, platform: input.platform, accountType: input.accountType, accountId: input.accountId?.trim() || undefined, encryptedToken: encrypt(token), active: true, lastHeartbeatAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   const project = await pgGetOrCreateSystemProject();
   await pgUpsertGameCache(project.id, namespace, storageKey(userId, input.platform), record as unknown as Record<string, unknown>, null);
   try {
@@ -127,6 +127,51 @@ export async function reconnectSavedDerivSessions(): Promise<void> {
     try { await connectCredential(record); }
     catch (error) { console.warn("[DERIV_SESSION] Reconnect failed for user/platform:", record.userId, record.platform, error instanceof Error ? error.message : String(error)); scheduleReconnect(record.userId, record.platform); }
   }
+}
+
+export async function heartbeatDerivSession(userId: string, platform: Platform) {
+  const project = await pgGetOrCreateSystemProject();
+  const key = storageKey(userId, platform);
+  const row = await pgGetGameCache(project.id, namespace, key);
+  if (!row) return { configured: false, active: false, connected: false };
+  const record = row.data as unknown as StoredCredential;
+  if (record.active !== true) return { configured: true, active: false, connected: false };
+  record.lastHeartbeatAt = new Date().toISOString();
+  record.updatedAt = record.lastHeartbeatAt;
+  await pgUpsertGameCache(project.id, namespace, key, record as unknown as Record<string, unknown>, null);
+  let session = live.get(key);
+  if (!session || session.socket.readyState !== WebSocket.OPEN) {
+    try { await connectCredential(record); } catch (error) {
+      scheduleReconnect(userId, platform);
+      throw error;
+    }
+    session = live.get(key);
+  }
+  return { configured: true, active: true, connected: Boolean(session && session.socket.readyState === WebSocket.OPEN) };
+}
+
+async function reapStaleDerivSessions(): Promise<void> {
+  const project = await pgGetOrCreateSystemProject();
+  const rows = await pgListGameCache(project.id, namespace, 200);
+  const cutoff = Date.now() - 120_000;
+  for (const row of rows) {
+    const record = row.data as unknown as StoredCredential;
+    if (!record?.active || !record.userId || !["main", "aura"].includes(record.platform)) continue;
+    if (Date.parse(record.lastHeartbeatAt ?? record.updatedAt ?? "") >= cutoff) continue;
+    const key = storageKey(record.userId, record.platform);
+    closeLive(key);
+    const inactive = { ...record, active: false, updatedAt: new Date().toISOString() };
+    await pgUpsertGameCache(project.id, namespace, key, inactive as unknown as Record<string, unknown>, null);
+    const timer = reconnectTimers.get(key);
+    if (timer) clearTimeout(timer);
+    reconnectTimers.delete(key);
+    reconnectAttempts.delete(key);
+    console.warn("[DERIV_SESSION] Closed stale session after missing platform heartbeat:", record.userId, record.platform);
+  }
+}
+
+export function startDerivSessionReaper(): void {
+  setInterval(() => { void reapStaleDerivSessions().catch((error) => console.warn("[DERIV_SESSION] Reaper failed:", error instanceof Error ? error.message : String(error))); }, 30_000).unref?.();
 }
 
 export async function getDerivSessionStatus(userId: string, platform: Platform) {
