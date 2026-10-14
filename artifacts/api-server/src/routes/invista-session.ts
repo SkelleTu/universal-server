@@ -12,9 +12,10 @@ function serviceKeyOk(req: Parameters<import("express").RequestHandler>[0]) {
 
 router.post("/invista/session/register", (req, res): void => {
   if (!serviceKeyOk(req)) { res.status(401).json({ error: "unauthorized" }); return; }
-  const { userId, platform } = req.body || {};
+  const { userId, platform, userEmail } = req.body || {};
   if (!userId || !["main", "aura"].includes(platform)) { res.status(400).json({ error: "userId and platform are required" }); return; }
-  const session = invistaSessionManager.register(String(userId), platform as TradingMode);
+  const email = typeof userEmail === "string" && userEmail.includes("@") ? userEmail.trim().toLowerCase() : undefined;
+  const session = invistaSessionManager.register(String(userId), platform as TradingMode, email);
   res.json({ ok: true, session });
 });
 
