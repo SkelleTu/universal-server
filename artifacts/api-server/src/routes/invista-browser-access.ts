@@ -17,8 +17,11 @@ function hashGrant(grant: string): string {
   return crypto.createHash("sha256").update(grant).digest("hex");
 }
 function platformOrigin(platform: string): string {
-  const raw = platform === "aura" ? process.env.INVISTA_AURA_URL : process.env.INVISTA_MAIN_URL;
-  if (!raw) throw new Error(`Missing platform URL for ${platform}`);
+  const configured = platform === "aura" ? process.env.INVISTA_AURA_URL : process.env.INVISTA_MAIN_URL;
+  const fallback = platform === "aura"
+    ? "https://invista-pro-v10-aura-system-style-d6jw.onrender.com"
+    : "https://invista-pro-v10-kzlv.onrender.com";
+  const raw = String(configured ?? fallback).trim();
   const url = new URL(raw);
   if (url.protocol !== "https:" && process.env.NODE_ENV === "production") throw new Error("Platform URL must use HTTPS in production.");
   return url.origin;
