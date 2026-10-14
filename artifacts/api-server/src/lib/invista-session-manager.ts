@@ -40,7 +40,11 @@ class InvistaSessionManager {
         await pgDeleteGameCache(project.id, this.namespace, row.cache_key);
         continue;
       }
+      // A process restart must never restore an armed trading state.
+      value.tradingArmed = false;
+      value.status = "ready";
       this.sessions.set(value.sessionId, value);
+      await this.persist(value);
     }
     console.log(`[UNIVERSAL_SESSION] Restored ${this.sessions.size} active platform session(s) from persistent storage.`);
   }
@@ -49,6 +53,8 @@ class InvistaSessionManager {
     const now = new Date().toISOString();
     const existing = [...this.sessions.values()].find(
       s => s.userId === userId && s.platform === platform
+        && s.status !== "disconnected"
+        && Date.now() - Date.parse(s.lastHeartbeatAt) <= this.ttlMs
     );
     if (existing) {
       if (userEmail) existing.userEmail = userEmail.trim().toLowerCase();
