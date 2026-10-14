@@ -6,9 +6,11 @@ import { createDerivAccountContext, type DerivAccountType } from "./deriv-accoun
 
 type Platform = "main" | "aura";
 type StoredCredential = { userId: string; platform: Platform; accountType: DerivAccountType; accountId?: string; encryptedToken: string; updatedAt: string };
-type LiveSession = { key: string; userId: string; platform: Platform; accountType: DerivAccountType; accountId: string; socket: WebSocket; connectedAt: string; lastMessageAt: string; heartbeat?: ReturnType<typeof setInterval> };
+type LiveSession = { key: string; userId: string; platform: Platform; accountType: DerivAccountType; accountId: string; socket: WebSocket; connectedAt: string; lastMessageAt: string; heartbeat?: ReturnType<typeof setInterval>; intentionalClose?: boolean };
 const live = new Map<string, LiveSession>();
 const connecting = new Set<string>();
+const reconnectAttempts = new Map<string, number>();
+const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const namespace = "invista-deriv-token";
 
 function storageKey(userId: string, platform: Platform): string { return `${platform}:${userId}`; }
@@ -61,6 +63,25 @@ async function connectCredential(record: StoredCredential): Promise<{ connected:
     socket.addEventListener("close", () => {
       if (session.heartbeat) clearInterval(session.heartbeat);
       if (live.get(key) === session) live.delete(key);
+      if (session.intentionalClose) return;
+      const previous = reconnectTimers.get(key);
+      if (previous) clearTimeout(previous);
+      const attempt = Math.min((reconnectAttempts.get(key) ?? 0) + 1, 8);
+      reconnectAttempts.set(key, attempt);
+      const delayMs = Math.min(1000 * (2 ** (attempt - 1)), 60_000);
+      const timer = setTimeout(async () => {
+        reconnectTimers.delete(key);
+        try {
+          const saved = await credential(session.userId, session.platform);
+          if (!saved) { reconnectAttempts.delete(key); return; }
+          await connectCredential(saved);
+          reconnectAttempts.delete(key);
+        } catch (error) {
+          console.warn("[DERIV_SESSION] Reconnect attempt failed:", session.userId, session.platform, error instanceof Error ? error.message : String(error));
+        }
+      }, delayMs);
+      timer.unref?.();
+      reconnectTimers.set(key, timer);
     });
     session.heartbeat = setInterval(() => {
       if (socket.readyState === WebSocket.OPEN) {
