@@ -47,6 +47,21 @@ router.post("/invista/session/disconnect", (req, res): void => {
   res.json({ ok });
 });
 
+router.get("/invista/session/remote-status", (req, res): void => {
+  if (!serviceKeyOk(req)) { res.status(401).json({ ok: false, error: "unauthorized" }); return; }
+  const sessionId = String(req.query.sessionId ?? "");
+  const userId = String(req.query.userId ?? "");
+  const platform = String(req.query.platform ?? "");
+  if (!sessionId || !userId || !["main", "aura"].includes(platform)) {
+    res.status(400).json({ ok: false, error: "sessionId, userId and platform are required", active: false });
+    return;
+  }
+  const active = invistaSessionManager.getActive(userId, platform as TradingMode);
+  const matches = Boolean(active && active.sessionId === sessionId);
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.json({ ok: true, active: matches, checkedAt: new Date().toISOString() });
+});
+
 router.get("/invista/sessions", (req, res): void => {
   if (!serviceKeyOk(req)) { res.status(401).json({ error: "unauthorized" }); return; }
   res.json({ ok: true, sessions: invistaSessionManager.list() });
