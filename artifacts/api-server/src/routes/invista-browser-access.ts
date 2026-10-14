@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { pgDeleteGameCache, pgGetGameCache, pgGetOrCreateSystemProject, pgUpsertGameCache } from "../lib/pglite";
+import { invistaSessionManager, type TradingMode } from "../lib/invista-session-manager";
 
 const router = Router();
 const COLLECTION = "invista-browser-access";
@@ -32,10 +33,15 @@ router.post("/invista/browser-access/grants", async (req: Request, res: Response
   const consent = req.body?.userConsented === true;
   if (!userId || !["main", "aura"].includes(platform)) { res.status(400).json({ ok: false, error: "userId and platform are required" }); return; }
   if (!consent) { res.status(403).json({ ok: false, error: "explicit_user_consent_required" }); return; }
+  const activeSession = invistaSessionManager.getActive(userId, platform as TradingMode);
+  if (!activeSession) {
+    res.status(409).json({ ok: false, error: "source_platform_session_not_active" });
+    return;
+  }
   const grant = crypto.randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + GRANT_TTL_MS).toISOString();
   const project = await pgGetOrCreateSystemProject();
-  await pgUpsertGameCache(project.id, COLLECTION, hashGrant(grant), { userId, platform, createdAt: new Date().toISOString() }, expiresAt);
+  await pgUpsertGameCache(project.id, COLLECTION, hashGrant(grant), { userId, platform, sessionId: activeSession.sessionId, createdAt: new Date().toISOString() }, expiresAt);
   let launchUrl: string;
   try { launchUrl = `${platformOrigin(platform)}/api/auth/universal-exchange?grant=${encodeURIComponent(grant)}`; }
   catch { await pgDeleteGameCache(project.id, COLLECTION, hashGrant(grant)); res.status(503).json({ ok: false, error: "platform_origin_not_configured" }); return; }
@@ -60,8 +66,18 @@ router.post("/invista/browser-access/redeem", async (req: Request, res: Response
     await pgDeleteGameCache(project.id, COLLECTION, key);
     const userId = String(stored.data.userId ?? "");
     const platform = String(stored.data.platform ?? "");
-    if (!userId || !["main", "aura"].includes(platform)) { res.status(401).json({ ok: false, error: "invalid_grant_payload" }); return; }
-    res.json({ ok: true, userId, platform, redeemedAt: new Date().toISOString() });
+    const sessionId = String(stored.data.sessionId ?? "");
+    if (!userId || !["main", "aura"].includes(platform) || !sessionId) {
+      res.status(401).json({ ok: false, error: "invalid_grant_payload" });
+      return;
+    }
+    const activeSession = invistaSessionManager.getActive(userId, platform as TradingMode);
+    if (!activeSession || activeSession.sessionId !== sessionId) {
+      res.status(401).json({ ok: false, error: "source_platform_session_inactive" });
+      return;
+    }
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.json({ ok: true, userId, platform, sessionId, redeemedAt: new Date().toISOString() });
   } finally {
     redeeming.delete(key);
   }
