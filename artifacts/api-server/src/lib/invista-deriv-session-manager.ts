@@ -5,7 +5,7 @@ import {
 import { createDerivAccountContext, type DerivAccountType } from "./deriv-account-gateway";
 
 type Platform = "main" | "aura";
-type StoredCredential = { userId: string; platform: Platform; accountType: DerivAccountType; accountId?: string; encryptedToken: string; updatedAt: string };
+type StoredCredential = { userId: string; platform: Platform; accountType: DerivAccountType; accountId?: string; encryptedToken: string; active: boolean; updatedAt: string };
 type LiveSession = { key: string; userId: string; platform: Platform; accountType: DerivAccountType; accountId: string; socket: WebSocket; connectedAt: string; lastMessageAt: string; heartbeat?: ReturnType<typeof setInterval>; intentionalClose?: boolean };
 const live = new Map<string, LiveSession>();
 const connecting = new Set<string>();
@@ -104,7 +104,7 @@ export async function saveAndConnectDerivSession(input: { userId: string; platfo
   const userId = String(input.userId ?? "").trim();
   const token = String(input.token ?? "").trim();
   if (!userId || !token || !["main", "aura"].includes(input.platform) || !["demo", "real"].includes(input.accountType)) throw new Error("userId, token, platform and accountType are required.");
-  const record: StoredCredential = { userId, platform: input.platform, accountType: input.accountType, accountId: input.accountId?.trim() || undefined, encryptedToken: encrypt(token), updatedAt: new Date().toISOString() };
+  const record: StoredCredential = { userId, platform: input.platform, accountType: input.accountType, accountId: input.accountId?.trim() || undefined, encryptedToken: encrypt(token), active: true, updatedAt: new Date().toISOString() };
   const project = await pgGetOrCreateSystemProject();
   await pgUpsertGameCache(project.id, namespace, storageKey(userId, input.platform), record as unknown as Record<string, unknown>, null);
   try {
@@ -123,7 +123,7 @@ export async function reconnectSavedDerivSessions(): Promise<void> {
   const rows = await pgListGameCache(project.id, namespace, 200);
   for (const row of rows) {
     const record = row.data as unknown as StoredCredential;
-    if (!record?.userId || !["main", "aura"].includes(record.platform) || !["demo", "real"].includes(record.accountType) || !record.encryptedToken) continue;
+    if (!record?.userId || record.active !== true || !["main", "aura"].includes(record.platform) || !["demo", "real"].includes(record.accountType) || !record.encryptedToken) continue;
     try { await connectCredential(record); }
     catch (error) { console.warn("[DERIV_SESSION] Reconnect failed for user/platform:", record.userId, record.platform, error instanceof Error ? error.message : String(error)); scheduleReconnect(record.userId, record.platform); }
   }
@@ -132,7 +132,23 @@ export async function reconnectSavedDerivSessions(): Promise<void> {
 export async function getDerivSessionStatus(userId: string, platform: Platform) {
   const record = await credential(userId, platform);
   const session = live.get(storageKey(userId, platform));
-  return { configured: Boolean(record), connected: Boolean(session && session.socket.readyState === WebSocket.OPEN), accountType: record?.accountType ?? null, accountId: session?.accountId ?? record?.accountId ?? null, connectedAt: session?.connectedAt ?? null, lastMessageAt: session?.lastMessageAt ?? null };
+  return { configured: Boolean(record), active: record?.active === true, connected: Boolean(session && session.socket.readyState === WebSocket.OPEN), accountType: record?.accountType ?? null, accountId: session?.accountId ?? record?.accountId ?? null, connectedAt: session?.connectedAt ?? null, lastMessageAt: session?.lastMessageAt ?? null };
+}
+
+export async function disconnectDerivSession(userId: string, platform: Platform) {
+  const key = storageKey(userId, platform);
+  const project = await pgGetOrCreateSystemProject();
+  const row = await pgGetGameCache(project.id, namespace, key);
+  closeLive(key);
+  if (row) {
+    const record = row.data as unknown as StoredCredential;
+    await pgUpsertGameCache(project.id, namespace, key, { ...record, active: false, updatedAt: new Date().toISOString() } as unknown as Record<string, unknown>, null);
+  }
+  const timer = reconnectTimers.get(key);
+  if (timer) clearTimeout(timer);
+  reconnectTimers.delete(key);
+  reconnectAttempts.delete(key);
+  return { ok: true, disconnected: true, credentialPreserved: Boolean(row) };
 }
 
 export async function disconnectAndDeleteDerivSession(userId: string, platform: Platform) {
