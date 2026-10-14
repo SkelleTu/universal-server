@@ -92,6 +92,18 @@ class InvistaSessionManager {
     return session ?? null;
   }
 
+  getActiveByEmail(userEmail: string, platform: TradingMode): InvistaSession | null {
+    const email = String(userEmail ?? "").trim().toLowerCase();
+    if (!email) return null;
+    const now = Date.now();
+    const session = [...this.sessions.values()].find(
+      item => item.userEmail === email && item.platform === platform
+        && item.status !== "disconnected"
+        && now - Date.parse(item.lastHeartbeatAt) <= this.ttlMs,
+    );
+    return session ?? null;
+  }
+
   list() {
     return [...this.sessions.values()].map(s => ({
       ...s,
