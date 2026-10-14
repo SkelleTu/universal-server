@@ -15,7 +15,9 @@ import auroraToolingRouter from "./aurora-tooling";
 import mcpRouter from "./mcp";
 import operatorRouter from "./operator";
 import invistaSessionRouter from "./invista-session";
+import invistaBrowserAccessRouter from "./invista-browser-access";
 import derivRouter from "./deriv";
+import invistaDerivSessionRouter from "./invista-deriv-session";
 
 const router: IRouter = Router();
 
@@ -34,7 +36,9 @@ router.use(auroraToolingRouter);
 router.use(mcpRouter);
 router.use(operatorRouter);
 router.use(invistaSessionRouter);
+router.use(invistaBrowserAccessRouter);
 router.use(derivRouter);
+router.use(invistaDerivSessionRouter);
 router.use(agentRouter);
 
 export default router;
