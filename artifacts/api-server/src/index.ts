@@ -1,7 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { initPGlite, pgFlushPersistence } from "./lib/pglite";
-import { reconnectSavedDerivSessions } from "./lib/invista-deriv-session-manager";
+import { reconnectSavedDerivSessions, startDerivSessionReaper } from "./lib/invista-deriv-session-manager";
 
 const rawPort = process.env["PORT"];
 if (!rawPort) throw new Error("PORT environment variable is required but was not provided.");
@@ -16,6 +16,7 @@ if (Number.isNaN(port) || port <= 0) throw new Error(`Invalid PORT value: "${raw
         { host: "0.0.0.0", port, database: "github", persistentDatabase: true },
         "Universal Server listening",
       );
+      startDerivSessionReaper();
       void reconnectSavedDerivSessions().catch((err) => logger.error({ err }, "Saved Deriv session recovery failed"));
     });
 
