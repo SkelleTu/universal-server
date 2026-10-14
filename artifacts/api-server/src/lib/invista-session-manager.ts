@@ -5,6 +5,7 @@ export type TradingMode = "main" | "aura";
 export interface InvistaSession {
   sessionId: string;
   userId: string;
+  userEmail?: string;
   platform: TradingMode;
   connectedAt: string;
   lastHeartbeatAt: string;
@@ -18,12 +19,13 @@ class InvistaSessionManager {
   private sessions = new Map<string, InvistaSession>();
   private readonly ttlMs = Number(process.env.INVISTA_SESSION_TTL_MS || 120_000);
 
-  register(userId: string, platform: TradingMode): InvistaSession {
+  register(userId: string, platform: TradingMode, userEmail?: string): InvistaSession {
     const now = new Date().toISOString();
     const existing = [...this.sessions.values()].find(
       s => s.userId === userId && s.platform === platform
     );
     if (existing) {
+      if (userEmail) existing.userEmail = userEmail.trim().toLowerCase();
       existing.lastHeartbeatAt = now;
       existing.lastInvistaHeartbeatAt = now;
       existing.lastActivityAt = now;
@@ -33,6 +35,7 @@ class InvistaSessionManager {
     const session: InvistaSession = {
       sessionId: crypto.randomUUID(),
       userId,
+      ...(userEmail ? { userEmail: userEmail.trim().toLowerCase() } : {}),
       platform,
       connectedAt: now,
       lastHeartbeatAt: now,
@@ -83,6 +86,18 @@ class InvistaSessionManager {
     const now = Date.now();
     const session = [...this.sessions.values()].find(
       item => item.userId === userId && item.platform === platform
+        && item.status !== "disconnected"
+        && now - Date.parse(item.lastHeartbeatAt) <= this.ttlMs,
+    );
+    return session ?? null;
+  }
+
+  getActiveByEmail(userEmail: string, platform: TradingMode): InvistaSession | null {
+    const email = String(userEmail ?? "").trim().toLowerCase();
+    if (!email) return null;
+    const now = Date.now();
+    const session = [...this.sessions.values()].find(
+      item => item.userEmail === email && item.platform === platform
         && item.status !== "disconnected"
         && now - Date.parse(item.lastHeartbeatAt) <= this.ttlMs,
     );
