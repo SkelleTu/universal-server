@@ -23,7 +23,10 @@ function platformOrigin(platform: string): string {
     : "https://invista-pro-v10-kzlv.onrender.com";
   const raw = String(configured ?? fallback).trim();
   const url = new URL(raw);
-  if (url.protocol !== "https:" && process.env.NODE_ENV === "production") throw new Error("Platform URL must use HTTPS in production.");
+  if (process.env.NODE_ENV === "production") {
+    if (url.protocol !== "https:") throw new Error("Platform URL must use HTTPS in production.");
+    if (url.origin !== new URL(fallback).origin) throw new Error("Platform URL origin is not in the production allowlist.");
+  }
   return url.origin;
 }
 
