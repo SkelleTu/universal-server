@@ -65,6 +65,23 @@ async function readFile(path: string): Promise<FileState | null> {
   return { text: Buffer.from(p.content.replace(/\n/g, ""), "base64").toString("utf8"), sha: p.sha };
 }
 
+// Render may start a replacement instance while the previous instance is
+// waking from hibernation and persisting the same encrypted snapshot. GitHub's
+// Contents API can briefly return 404 during that handoff. Retry before treating
+// the primary database as absent, otherwise startup could attempt an empty DB write.
+async function readPrimarySnapshotWithRetry(): Promise<FileState | null> {
+  const delaysMs = [250, 500, 1000, 2000];
+  for (let attempt = 0; attempt <= delaysMs.length; attempt++) {
+    const current = await readPrimarySnapshotWithRetry();
+    if (current) return current;
+    if (attempt < delaysMs.length) {
+      logger.warn({ path: DB_PATH, attempt: attempt + 1 }, "Primary GitHub database snapshot returned 404; retrying before initialization");
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
+    }
+  }
+  return null;
+}
+
 async function readFileBytes(path: string): Promise<{ bytes: Buffer; sha: string } | null> {
   const encoded = path.split("/").map(encodeURIComponent).join("/");
   const r = await gh(`/repos/${cfg().repo}/contents/${encoded}?ref=main`);
