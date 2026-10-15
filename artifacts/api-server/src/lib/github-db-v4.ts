@@ -72,7 +72,7 @@ async function readFile(path: string): Promise<FileState | null> {
 async function readPrimarySnapshotWithRetry(): Promise<FileState | null> {
   const delaysMs = [250, 500, 1000, 2000];
   for (let attempt = 0; attempt <= delaysMs.length; attempt++) {
-    const current = await readPrimarySnapshotWithRetry();
+    const current = await readFile(DB_PATH);
     if (current) return current;
     if (attempt < delaysMs.length) {
       logger.warn({ path: DB_PATH, attempt: attempt + 1 }, "Primary GitHub database snapshot returned 404; retrying before initialization");
@@ -284,7 +284,7 @@ async function persistNow() { if (!state) return; const snapshot = JSON.parse(JS
 export async function initGitHubDatabase(): Promise<void> {
   if (state) return;
   const c = cfg();
-  const current = await readFile(DB_PATH);
+  const current = await readPrimarySnapshotWithRetry();
   if (current) {
     sha = current.sha;
     let currentSnapshot: DatabaseSnapshot | null = null;
