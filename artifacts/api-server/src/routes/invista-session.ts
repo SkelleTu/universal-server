@@ -11,20 +11,20 @@ function serviceKeyOk(req: Parameters<import("express").RequestHandler>[0]) {
   return supplied.length > 0 && supplied === configured;
 }
 
-router.post("/invista/session/register", (req, res): void => {
+router.post("/invista/session/register", async (req, res): Promise<void> => {
   if (!serviceKeyOk(req)) { res.status(401).json({ error: "unauthorized" }); return; }
   const { userId, platform, userEmail } = req.body || {};
   if (!userId || !["main", "aura"].includes(platform)) { res.status(400).json({ error: "userId and platform are required" }); return; }
   const email = typeof userEmail === "string" && userEmail.includes("@") ? userEmail.trim().toLowerCase() : undefined;
-  const session = invistaSessionManager.register(String(userId), platform as TradingMode, email);
+  const session = await invistaSessionManager.register(String(userId), platform as TradingMode, email);
   res.json({ ok: true, session });
 });
 
-router.post("/invista/session/heartbeat", (req, res): void => {
+router.post("/invista/session/heartbeat", async (req, res): Promise<void> => {
   if (!serviceKeyOk(req)) { res.status(401).json({ error: "unauthorized" }); return; }
   const { sessionId, userId, platform, tradingArmed } = req.body || {};
   if (!sessionId || !userId || !["main", "aura"].includes(platform)) { res.status(400).json({ error: "sessionId, userId and platform are required" }); return; }
-  const session = invistaSessionManager.heartbeat(
+  const session = await invistaSessionManager.heartbeat(
     String(sessionId), String(userId), platform as TradingMode,
     typeof tradingArmed === "boolean" ? tradingArmed : undefined,
   );
@@ -32,20 +32,20 @@ router.post("/invista/session/heartbeat", (req, res): void => {
   res.json({ ok: true, session });
 });
 
-router.post("/invista/session/arm", (req, res): void => {
+router.post("/invista/session/arm", async (req, res): Promise<void> => {
   if (!serviceKeyOk(req)) { res.status(401).json({ error: "unauthorized" }); return; }
   const { sessionId, userId, armed } = req.body || {};
   if (!sessionId || !userId || typeof armed !== "boolean") { res.status(400).json({ error: "sessionId, userId and armed are required" }); return; }
-  const session = invistaSessionManager.setTradingArmed(String(sessionId), String(userId), armed);
+  const session = await invistaSessionManager.setTradingArmed(String(sessionId), String(userId), armed);
   if (!session) { res.status(404).json({ error: "session_not_found" }); return; }
   res.json({ ok: true, session });
 });
 
-router.post("/invista/session/disconnect", (req, res): void => {
+router.post("/invista/session/disconnect", async (req, res): Promise<void> => {
   if (!serviceKeyOk(req)) { res.status(401).json({ error: "unauthorized" }); return; }
   const { sessionId, userId } = req.body || {};
   if (!sessionId || !userId) { res.status(400).json({ error: "sessionId and userId are required" }); return; }
-  const ok = invistaSessionManager.disconnect(String(sessionId), String(userId));
+  const ok = await invistaSessionManager.disconnect(String(sessionId), String(userId));
   res.json({ ok });
 });
 
