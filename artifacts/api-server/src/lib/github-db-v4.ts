@@ -409,10 +409,19 @@ export async function initGitHubDatabase(): Promise<void> {
     throw new Error("No usable current database exists and one or more preserved snapshots could not be decrypted or migrated. Refusing to initialize an empty database until the historical encryption key is restored.", { cause: legacyError });
   }
 
+  // Never turn a transient GitHub 404, wrong repository, or missing permissions
+  // into a silent production data reset. A genuinely new installation must opt
+  // in explicitly, after confirming that no existing backup should be restored.
+  if (process.env.UNIVERSAL_SERVER_ALLOW_EMPTY_DATABASE?.trim().toLowerCase() !== "true") {
+    throw new Error(
+      "No primary, legacy, or quarantined database snapshot was found. Refusing to initialize an empty database by default. Verify BACKUP_GITHUB_REPO, BACKUP_GITHUB_TOKEN permissions, and backup files; set UNIVERSAL_SERVER_ALLOW_EMPTY_DATABASE=true only for an intentional first-time installation.",
+    );
+  }
+
   state = empty();
   dirty = true;
   await persistNow();
-  logger.info({ repository: c.repo, path: DB_PATH, rebuilt: true }, "GitHub database initialized");
+  logger.info({ repository: c.repo, path: DB_PATH, rebuilt: true }, "GitHub database initialized with explicit empty-database opt-in");
 }
 
 export async function createProject(name: string, description: string | null): Promise<Project> { const now = new Date().toISOString(); const p = { id: db().nextIds.projects++, name, description, api_key: crypto.randomBytes(32).toString("hex"), created_at: now }; db().projects.unshift(p); await persistNow(); return p; }
