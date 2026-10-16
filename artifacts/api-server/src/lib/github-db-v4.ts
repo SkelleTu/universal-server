@@ -284,7 +284,7 @@ async function persistNow() { if (!state) return; const snapshot = JSON.parse(JS
 export async function initGitHubDatabase(): Promise<void> {
   if (state) return;
   const c = cfg();
-  const current = await readFile(DB_PATH);
+  const current = await readPrimarySnapshotWithRetry();
   if (current) {
     sha = current.sha;
     let currentSnapshot: DatabaseSnapshot | null = null;
