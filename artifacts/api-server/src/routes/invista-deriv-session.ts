@@ -17,11 +17,12 @@ router.post("/invista/deriv/session", async (req: Request, res: Response): Promi
   const token = String(req.body?.token ?? "").trim();
   const accountType = String(req.body?.accountType ?? "").trim().toLowerCase();
   const accountId = String(req.body?.accountId ?? "").trim() || undefined;
+  const appId = String(req.body?.appId ?? "").trim() || undefined;
   if (!userId || !validPlatform(platform) || !token || !["demo", "real"].includes(accountType)) {
     res.status(400).json({ ok: false, error: "userId, platform, token and accountType (demo|real) are required" }); return;
   }
   try {
-    const state = await saveAndConnectDerivSession({ userId, platform, token, accountType: accountType as "demo" | "real", accountId });
+    const state = await saveAndConnectDerivSession({ userId, platform, token, accountType: accountType as "demo" | "real", accountId, appId });
     res.json({ ok: true, ...state });
   } catch (error) {
     res.status(502).json({ ok: false, connected: false, error: error instanceof Error ? error.message : "Deriv session connection failed" });
