@@ -65,17 +65,36 @@ async function readFile(path: string): Promise<FileState | null> {
   return { text: Buffer.from(p.content.replace(/\n/g, ""), "base64").toString("utf8"), sha: p.sha };
 }
 
-// Render may start a replacement instance while the previous instance is
-// waking from hibernation and persisting the same encrypted snapshot. GitHub's
-// Contents API can briefly return 404 during that handoff. Retry before treating
-// the primary database as absent, otherwise startup could attempt an empty DB write.
+// Check repository access separately from file existence. GitHub returns 404
+// for private repositories when the configured token cannot read them, which
+// must never be mistaken for a missing database snapshot.
+async function assertBackupRepositoryAccessible(): Promise<void> {
+  const { repo } = cfg();
+  const response = await gh(`/repos/${repo}`);
+  if (response.status === 404) {
+    throw new Error("GitHub backup repository is not visible to BACKUP_GITHUB_TOKEN. Verify BACKUP_GITHUB_REPO and grant the token Contents: Read access to the private backup repository.");
+  }
+  if (response.status === 403) {
+    throw new Error("GitHub denied access to the backup repository. Verify BACKUP_GITHUB_TOKEN permissions and repository access.");
+  }
+  if (!response.ok) {
+    throw new Error(`GitHub backup repository preflight failed (${response.status}): ${await response.text()}`);
+  }
+}
+
+// Render can briefly overlap old/new instances during hibernation. GitHub's
+// Contents API has intermittently returned 404 for the primary snapshot during
+// that handoff. Verify repo access first, then retry for up to ~45 seconds before
+// treating a genuinely missing snapshot as absent. Never create an empty DB on
+// a transient 404.
 async function readPrimarySnapshotWithRetry(): Promise<FileState | null> {
-  const delaysMs = [250, 500, 1000, 2000];
+  await assertBackupRepositoryAccessible();
+  const delaysMs = [500, 1000, 2000, 4000, 8000, 12000, 15000];
   for (let attempt = 0; attempt <= delaysMs.length; attempt++) {
     const current = await readFile(DB_PATH);
     if (current) return current;
     if (attempt < delaysMs.length) {
-      logger.warn({ path: DB_PATH, attempt: attempt + 1 }, "Primary GitHub database snapshot returned 404; retrying before initialization");
+      logger.warn({ path: DB_PATH, attempt: attempt + 1, retryInMs: delaysMs[attempt] }, "Primary GitHub database snapshot returned 404; retrying before initialization");
       await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
     }
   }
