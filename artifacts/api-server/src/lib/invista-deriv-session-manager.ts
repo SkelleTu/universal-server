@@ -5,7 +5,7 @@ import {
 import { createDerivAccountContext, type DerivAccountType } from "./deriv-account-gateway";
 
 type Platform = "main" | "aura";
-type StoredCredential = { userId: string; platform: Platform; accountType: DerivAccountType; accountId?: string; encryptedToken: string; active: boolean; lastHeartbeatAt: string; updatedAt: string };
+type StoredCredential = { userId: string; platform: Platform; accountType: DerivAccountType; accountId?: string; appId?: string; encryptedToken: string; active: boolean; lastHeartbeatAt: string; updatedAt: string };
 type LiveSession = { key: string; userId: string; platform: Platform; accountType: DerivAccountType; accountId: string; socket: WebSocket; connectedAt: string; lastMessageAt: string; heartbeat?: ReturnType<typeof setInterval>; intentionalClose?: boolean };
 const live = new Map<string, LiveSession>();
 const connecting = new Set<string>();
@@ -74,7 +74,7 @@ async function connectCredential(record: StoredCredential): Promise<{ connected:
   try {
     closeLive(key);
     const token = decrypt(record.encryptedToken);
-    const context = await createDerivAccountContext(token, record.accountType, record.accountId);
+    const context = await createDerivAccountContext(token, record.accountType, record.accountId, record.platform, record.appId);
     const socket = new WebSocket(context.websocketUrl);
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => { try { socket.close(); } catch {} reject(new Error("Deriv WebSocket connection timed out.")); }, 15000);
@@ -100,11 +100,11 @@ async function connectCredential(record: StoredCredential): Promise<{ connected:
   } finally { connecting.delete(key); }
 }
 
-export async function saveAndConnectDerivSession(input: { userId: string; platform: Platform; token: string; accountType: DerivAccountType; accountId?: string }) {
+export async function saveAndConnectDerivSession(input: { userId: string; platform: Platform; token: string; accountType: DerivAccountType; accountId?: string; appId?: string }) {
   const userId = String(input.userId ?? "").trim();
   const token = String(input.token ?? "").trim();
   if (!userId || !token || !["main", "aura"].includes(input.platform) || !["demo", "real"].includes(input.accountType)) throw new Error("userId, token, platform and accountType are required.");
-  const record: StoredCredential = { userId, platform: input.platform, accountType: input.accountType, accountId: input.accountId?.trim() || undefined, encryptedToken: encrypt(token), active: true, lastHeartbeatAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  const record: StoredCredential = { userId, platform: input.platform, accountType: input.accountType, accountId: input.accountId?.trim() || undefined, appId: String(input.appId ?? "").trim() || undefined, encryptedToken: encrypt(token), active: true, lastHeartbeatAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   const project = await pgGetOrCreateSystemProject();
   await pgUpsertGameCache(project.id, namespace, storageKey(userId, input.platform), record as unknown as Record<string, unknown>, null);
   try {
