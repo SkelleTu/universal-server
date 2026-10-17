@@ -2,25 +2,33 @@ export type DerivAccountType = 'demo' | 'real';
 
 const DERIV_API_BASE = 'https://api.derivws.com';
 
-function appId(): string {
-  const value = String(process.env.DERIV_APP_ID ?? '').trim();
-  if (!value) throw new Error('DERIV_APP_ID is required');
+type Platform = "main" | "aura";
+
+function appId(platform: Platform, supplied?: string): string {
+  const explicit = String(supplied ?? "").trim();
+  const platformSpecific = String(platform === "aura"
+    ? (process.env.DERIV_APP_ID_AURA || process.env.AURA_DERIV_APP_ID || "")
+    : (process.env.DERIV_APP_ID_MAIN || process.env.INVISTAPRO_DERIV_APP_ID || "")
+  ).trim();
+  const fallback = platform === "main" ? String(process.env.DERIV_APP_ID ?? "").trim() : "";
+  const value = explicit || platformSpecific || fallback;
+  if (!value) throw new Error(`Deriv App ID is not configured for platform: ${platform}`);
   return value;
 }
 
-function headers(token: string): Record<string, string> {
+function headers(token: string, platform: Platform, suppliedAppId?: string): Record<string, string> {
   return {
     Authorization: `Bearer ${token}`,
-    'Deriv-App-ID': appId(),
+    'Deriv-App-ID': appId(platform, suppliedAppId),
     Accept: 'application/json',
     'Content-Type': 'application/json',
   };
 }
 
-async function requestDeriv<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
+async function requestDeriv<T>(token: string, path: string, platform: Platform, suppliedAppId?: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${DERIV_API_BASE}${path}`, {
     ...init,
-    headers: { ...headers(token), ...(init.headers ?? {}) },
+    headers: { ...headers(token, platform, suppliedAppId), ...(init.headers ?? {}) },
   });
   const text = await response.text();
   let body: any = null;
@@ -56,31 +64,33 @@ function idOf(account: Record<string, unknown>): string | null {
   return value || null;
 }
 
-export async function getDerivAccounts(token: string): Promise<unknown> {
-  return requestDeriv(token, '/trading/v1/options/accounts');
+export async function getDerivAccounts(token: string, platform: Platform, suppliedAppId?: string): Promise<unknown> {
+  return requestDeriv(token, '/trading/v1/options/accounts', platform, suppliedAppId);
 }
 
-export async function resolveDerivAccount(token: string, accountType: DerivAccountType, preferredAccountId?: string): Promise<string> {
+export async function resolveDerivAccount(token: string, accountType: DerivAccountType, preferredAccountId: string | undefined, platform: Platform, suppliedAppId?: string): Promise<string> {
   if (preferredAccountId?.trim()) {
     const requestedId = preferredAccountId.trim();
-    const response = await getDerivAccounts(token);
+    const response = await getDerivAccounts(token, platform, suppliedAppId);
     const match = objects(response).find(account => idOf(account) === requestedId && typeOf(account) === accountType);
     if (!match) throw new Error(`Deriv account ${requestedId} is not a ${accountType} account or is not available to this token`);
     return requestedId;
   }
-  const response = await getDerivAccounts(token);
+  const response = await getDerivAccounts(token, platform, suppliedAppId);
   const match = objects(response).find(account => typeOf(account) === accountType && idOf(account));
   if (!match) throw new Error(`No Deriv Options ${accountType} account found`);
   return idOf(match)!;
 }
 
-export async function createDerivAccountContext(token: string, accountType: DerivAccountType, preferredAccountId?: string) {
+export async function createDerivAccountContext(token: string, accountType: DerivAccountType, preferredAccountId: string | undefined, platform: Platform, suppliedAppId?: string) {
   const authorizationToken = String(token ?? '').trim();
   if (!authorizationToken) throw new Error('Deriv authorization token is required');
-  const accountId = await resolveDerivAccount(authorizationToken, accountType, preferredAccountId);
+  const accountId = await resolveDerivAccount(authorizationToken, accountType, preferredAccountId, platform, suppliedAppId);
   const response = await requestDeriv<any>(
     authorizationToken,
     `/trading/v1/options/accounts/${encodeURIComponent(accountId)}/otp`,
+    platform,
+    suppliedAppId,
     { method: 'POST', body: '{}' },
   );
   const websocketUrl = String(response?.data?.url ?? '').trim();
@@ -94,5 +104,5 @@ export async function createDerivAccountContext(token: string, accountType: Deri
     throw new Error(`Deriv account routing mismatch for ${accountType}`);
   }
 
-  return { accountId, accountType, websocketUrl, appId: appId() };
+  return { accountId, accountType, websocketUrl, appId: appId(platform, suppliedAppId) };
 }
