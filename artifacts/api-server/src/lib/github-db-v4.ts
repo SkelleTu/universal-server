@@ -66,18 +66,27 @@ async function readFile(path: string): Promise<FileState | null> {
 }
 
 // Check repository access separately from file existence. GitHub returns 404
-// for private repositories when the configured token cannot read them, which
-// must never be mistaken for a missing database snapshot.
+// for private repositories when the configured token cannot read them. Render
+// can briefly overlap instances during wake/redeploy, and the same token/repo
+// has been observed succeeding after an initial 404, so retry metadata lookups
+// before treating the failure as a persistent permission/configuration problem.
 async function assertBackupRepositoryAccessible(): Promise<void> {
   const { repo } = cfg();
-  const response = await gh(`/repos/${repo}`);
-  if (response.status === 404) {
-    throw new Error("GitHub backup repository is not visible to BACKUP_GITHUB_TOKEN. Verify BACKUP_GITHUB_REPO and grant the token Contents: Read access to the private backup repository.");
-  }
-  if (response.status === 403) {
-    throw new Error("GitHub denied access to the backup repository. Verify BACKUP_GITHUB_TOKEN permissions and repository access.");
-  }
-  if (!response.ok) {
+  const delaysMs = [500, 1000, 2000, 4000, 8000, 12000, 15000];
+  for (let attempt = 0; attempt <= delaysMs.length; attempt++) {
+    const response = await gh(`/repos/${repo}`);
+    if (response.ok) return;
+    if (response.status === 404 && attempt < delaysMs.length) {
+      logger.warn({ repository: repo, attempt: attempt + 1, retryInMs: delaysMs[attempt] }, "GitHub backup repository preflight returned 404; retrying before failing closed");
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
+      continue;
+    }
+    if (response.status === 404) {
+      throw new Error("GitHub backup repository is not visible to BACKUP_GITHUB_TOKEN after retries. Verify BACKUP_GITHUB_REPO and grant the token Contents: Read access to the private backup repository.");
+    }
+    if (response.status === 403) {
+      throw new Error("GitHub denied access to the backup repository. Verify BACKUP_GITHUB_TOKEN permissions and repository access.");
+    }
     throw new Error(`GitHub backup repository preflight failed (${response.status}): ${await response.text()}`);
   }
 }
