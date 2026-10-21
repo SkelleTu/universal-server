@@ -1,0 +1,1 @@
+Internal Supreme Operator bus added on branch supreme-internal-bus. It preserves traceId, requestId and supreme operator mode while allowing trusted in-process execution without a bearer token. Integration into the existing supreme route and promotion to main remain separate deployment steps.

@@ -1,4 +1,5 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
+import { executeSupremeInternal } from "../supreme-internal.js";
 
 const router = Router();
 
@@ -115,30 +116,15 @@ router.post("/supreme/tool", async (req: Request, res: Response): Promise<void> 
     return;
   }
 
-  const body = {
+  const result = await executeSupremeInternal({
+    target: "agent",
     domain: req.body?.domain,
     action: req.body?.action,
     args: req.body?.args ?? {},
-    operatorMode: allowed,
     traceId,
     requestId,
-  };
-  const port = process.env.PORT ?? "10000";
-  const response = await fetch(`http://127.0.0.1:${port}/api/agent/action`, {
-    method: "POST",
-    headers: {
-      ...(req.headers.authorization ? { authorization: String(req.headers.authorization) } : {}),
-      "content-type": "application/json",
-      "x-trace-id": traceId,
-      "x-request-id": requestId,
-      "x-aurora-operator-mode": allowed,
-    },
-    body: JSON.stringify(body),
   });
-  const text = await response.text();
-  let result: unknown;
-  try { result = text ? JSON.parse(text) : null; } catch { result = { raw: text }; }
-  res.status(response.ok ? 200 : response.status).json({ ok: response.ok, executed: true, target: "agent", status: response.status, traceId, requestId, operatorMode: allowed, result });
+  res.status(result.ok ? 200 : result.status).json(result);
 });
 
 export default router;
